@@ -3,16 +3,16 @@ import mongoose from "mongoose";
 const userSchema = new mongoose.Schema({
     name: {
         type: String,
-        required: [true, 'Provide a name'],
+        required: [true, 'Name is required'],
     },
     email: {
         type: String,
-        required: [true, 'Provide an email'],
+        required: [true, 'Email is required'],
         unique: true,
     },
     password: {
         type: String,
-        required: [true, 'Provide a password'],
+        required: [true, 'Password is required'],
     },
     avatar: {
         type: String,
@@ -44,7 +44,7 @@ const userSchema = new mongoose.Schema({
     shopping_cart: [
         {
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'cartProduct'
+            ref: 'CartProduct'
         }
     ],
     order_history: [
@@ -53,11 +53,11 @@ const userSchema = new mongoose.Schema({
             ref: 'Order'
         }
     ],
-    forgot_password_otp: {
+    otp: {
         type: String,
         default: null,
     },
-    forgot_password_expiry: {
+    otp_expiry: {
         type: Date,
         default: null,
     },
@@ -70,6 +70,6 @@ const userSchema = new mongoose.Schema({
     { timestamps: true }
 );
 
-const User = mongoose.model('User', userSchema);
+const UserModel = mongoose.model('User', userSchema);
 
 export default UserModel;

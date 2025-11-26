@@ -30,6 +30,7 @@ const addressSchema = new mongoose.Schema({
     userId: {
         type: mongoose.Schema.Types.ObjectId,
         default: '',
+        ref: 'User',
     }
 }, { timestamps: true }
 );
