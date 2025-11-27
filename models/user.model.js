@@ -65,6 +65,10 @@ const userSchema = new mongoose.Schema({
         type: String,
         enum: ['User', 'Admin'],
         default: 'User',
+    },
+    refresh_token: {
+        type: String,
+        default: '',
     }
 },
     { timestamps: true }

@@ -3,10 +3,14 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import sendVerificationEmail from "../config/sendVerificationEmail.js";
 import VerificationEmailTemplate from "../utils/verifyEmailTemplate.js";
+import generateAccessToken from "../utils/generatedAccessToken.js";
+import generateRefreshToken from "../utils/generatedRefreshToken.js";
 
+// Register User Controller
 export async function registerUserController(req, res) {
     try {
         const { name, email, password } = req.body;
+        
         if (!name || !email || !password) {
             return res.status(400).json({
                 message: 'Name, email and password are required',
@@ -14,6 +18,7 @@ export async function registerUserController(req, res) {
                 success: false
             });
         }
+
         const userExists = await UserModel.findOne({ email });
         if (userExists) {
             return res.status(409).json({
@@ -38,18 +43,24 @@ export async function registerUserController(req, res) {
 
         await newUser.save();
 
-        // Send verification email logic here (omitted for brevity)
-        await sendVerificationEmail({
-            sendTo: email,
-            subject: 'Verify your email from E-Commerce App',
-            text: 'Please verify your email using the OTP sent to your email address.',
-            html: VerificationEmailTemplate(name, verifyCode)
-        });
+        try {
+            await sendVerificationEmail({
+                sendTo: email,
+                subject: 'Verify your email from E-Commerce App',
+                text: 'Please verify your email using the OTP sent to your email address.',
+                html: VerificationEmailTemplate(name, verifyCode)
+            });
+        } catch (emailError) {
+            // Email failed but user created - log error
+            console.error('Failed to send verification email:', emailError);
+            // Consider: delete user or allow retry
+        }
 
         // Create a JWT token for verification purpose (if needed)
         const token = jwt.sign(
             { email: newUser.email, id: newUser._id },
             process.env.JWT_SECRET,
+            { expiresIn: '1h' } // expiry time
         );
 
         return res.status(200).json({
@@ -68,6 +79,7 @@ export async function registerUserController(req, res) {
     }
 }
 
+// Verify Email Controller
 export async function verifyEmailController(req, res) {
     try {
         const { email, otp } = req.body;
@@ -110,6 +122,122 @@ export async function verifyEmailController(req, res) {
             success: true
         });
 
+    } catch (error) {
+        return res.status(500).json({
+            message: error.message || error,
+            error: true,
+            success: false
+        });
+    }
+}
+
+// Login User Controller
+export async function loginUserController(req, res) {
+    try {
+        const { email, password } = req.body;
+
+        if (!email || !password) {
+            return res.status(400).json({
+                message: 'Email and password are required',
+                error: true,
+                success: false
+            });
+        }
+
+        const user = await UserModel.findOne({ email });
+        if (!user) {
+            return res.status(404).json({
+                message: 'User not found',
+                error: true,
+                success: false
+            });
+        }
+
+        if (user.status !== 'Active') {
+            return res.status(403).json({
+                message: 'User account is not active',
+                error: true,
+                success: false
+            });
+        }
+
+        const isPasswordValid = await bcrypt.compare(password, user.password);
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                message: 'Invalid password',
+                error: true,
+                success: false
+            });
+        }
+
+        const accessToken = await generateAccessToken(user);
+        const refreshToken = await generateRefreshToken(user);
+
+        await UserModel.findByIdAndUpdate(
+            user._id,
+            { last_login_date: Date.now() },
+        );
+
+        const cookiesOptions = {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'None',
+        };
+
+        res.cookie('accessToken', accessToken, cookiesOptions);
+        res.cookie('refreshToken', refreshToken, cookiesOptions);
+
+        return res.status(200).json({
+            message: 'Login successful',
+            error: false,
+            success: true,
+            data: {
+                accessToken,
+                refreshToken
+            }
+        });
+    } catch (error) {
+        return res.status(500).json({
+            message: error.message || error,
+            error: true,
+            success: false
+        });
+    }
+}
+
+// Logout User Controller
+export async function logoutUserController(req, res) {
+    try {
+        const userId = req.userId; // Từ auth middleware
+        
+        if (!userId) {
+            return res.status(401).json({
+                message: 'Unauthorized',
+                error: true,
+                success: false
+            });
+        }
+
+        const cookiesOption = {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'None'
+        };
+
+        // Clear cookies trước
+        res.clearCookie('accessToken', cookiesOption);
+        res.clearCookie('refreshToken', cookiesOption);
+        
+        await UserModel.findByIdAndUpdate(
+            userId,
+            { refresh_token: "" }
+        );
+
+        return res.status(200).json({
+            message: 'Logout successful',
+            error: false,
+            success: true
+        });
     } catch (error) {
         return res.status(500).json({
             message: error.message || error,
