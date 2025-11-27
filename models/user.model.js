@@ -16,7 +16,11 @@ const userSchema = new mongoose.Schema({
     },
     avatar: {
         type: String,
-        default: '',
+        default: "",
+    },
+    avatar_public_id: {
+        type: String,
+        default: "",
     },
     mobile: {
         type: String,
