@@ -172,6 +172,14 @@ export async function loginUserController(req, res) {
             });
         }
 
+        if (!user.verify_email) {
+            return res.status(403).json({
+                message: 'Email is not verified',
+                error: true,
+                success: false
+            });
+        }
+
         const isPasswordValid = await bcrypt.compare(password, user.password);
         if (!isPasswordValid) {
             return res.status(401).json({
@@ -316,6 +324,137 @@ export async function uploadAvatarController(req, res) {
 
         return res.status(500).json({
             message: error.message || 'Failed to upload avatar',
+            error: true,
+            success: false
+        });
+    }
+}
+
+// Get User Profile Controller
+export async function getUserProfileController(req, res) {
+    try {
+        const userId = req.userId; // From auth middleware
+
+        const user = await UserModel.findById(userId).select('-password -otp -otp_expiry -refresh_token');
+        
+        if (!user) {
+            return res.status(404).json({
+                message: 'User not found',
+                error: true,
+                success: false
+            });
+        }
+
+        return res.status(200).json({
+            message: 'User profile retrieved successfully',
+            error: false,
+            success: true,
+            data: user
+        });
+        
+    } catch (error) {
+        return res.status(500).json({
+            message: error.message || error,
+            error: true,
+            success: false
+        });
+    }
+}
+
+// Update User Profile Controller
+export async function updateUserProfileController(req, res) {
+    try {
+        const userId = req.userId; // From auth middleware
+        const { name, email, mobile, password } = req.body;
+
+        const user = await UserModel.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                message: 'User not found',
+                error: true,
+                success: false
+            });
+        }
+
+        // Check if email is being changed and if new email already exists
+        if (email && email !== user.email) {
+            const emailExists = await UserModel.findOne({ email });
+            if (emailExists) {
+                return res.status(409).json({
+                    message: 'Email already exists',
+                    error: true,
+                    success: false
+                });
+            }
+        }
+
+        let verifyCode = "";
+        const emailChanged = email && email !== user.email;
+        
+        if (emailChanged) {
+            verifyCode = Math.floor(100000 + Math.random() * 900000).toString();
+        }
+
+        let hashedPassword = user.password; // Keep existing password by default
+        if (password) {
+            const salt = await bcrypt.genSalt(10);
+            hashedPassword = await bcrypt.hash(password, salt);
+        }
+
+        const updateData = {
+            name: name || user.name,
+            email: email || user.email,
+            mobile: mobile !== undefined ? mobile : user.mobile,
+            password: hashedPassword
+        };
+
+        // Only update email verification fields if email changed
+        if (emailChanged) {
+            updateData.verify_email = false;
+            updateData.otp = verifyCode;
+            updateData.otp_expiry = Date.now() + 10 * 60 * 1000;
+        }
+
+        const updatedUser = await UserModel.findByIdAndUpdate(
+            userId,
+            updateData,
+            { new: true }
+        ).select('-password -otp -otp_expiry -refresh_token');
+
+        // Send verification email if email changed
+        if (emailChanged) {
+            try {
+                await sendVerificationEmail({
+                    sendTo: updatedUser.email,
+                    subject: 'Verify your updated email from E-Commerce App',
+                    text: 'Please verify your email using the OTP sent to your email address.',
+                    html: VerificationEmailTemplate(updatedUser.name, verifyCode)
+                });
+            } catch (emailError) {
+                console.error('Failed to send verification email:', emailError);
+                // Return success but with warning about email
+                return res.status(200).json({
+                    message: 'Profile updated but verification email failed to send',
+                    error: false,
+                    success: true,
+                    data: updatedUser,
+                    warning: 'Please request a new verification code'
+                });
+            }
+        }
+
+        return res.status(200).json({
+            message: emailChanged 
+                ? 'Profile updated successfully. Please verify your new email.' 
+                : 'Profile updated successfully',
+            error: false,
+            success: true,
+            data: updatedUser
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: error.message || error,
             error: true,
             success: false
         });
