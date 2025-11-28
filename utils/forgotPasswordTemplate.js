@@ -1,4 +1,4 @@
-const VerificationEmailTemplate = (username, otp) => {
+const ForgotPasswordTemplate = (username, otp) => {
     return `
     <!DOCTYPE html>
     <html lang="en">
@@ -6,7 +6,7 @@ const VerificationEmailTemplate = (username, otp) => {
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <meta http-equiv="X-UA-Compatible" content="IE=edge">
-        <title>Verify Your Email</title>
+        <title>Password Reset Request</title>
         <!--[if mso]>
         <style type="text/css">
             body, table, td {font-family: Arial, Helvetica, sans-serif !important;}
@@ -22,9 +22,9 @@ const VerificationEmailTemplate = (username, otp) => {
                         
                         <!-- Header -->
                         <tr>
-                            <td style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
+                            <td style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); padding: 40px 30px; text-align: center; border-radius: 8px 8px 0 0;">
                                 <h1 style="margin: 0; color: #ffffff; font-size: 28px; font-weight: 600; letter-spacing: -0.5px;">
-                                    Email Verification
+                                    🔐 Password Reset Request
                                 </h1>
                             </td>
                         </tr>
@@ -33,52 +33,70 @@ const VerificationEmailTemplate = (username, otp) => {
                         <tr>
                             <td style="padding: 40px 30px;">
                                 <p style="margin: 0 0 20px; font-size: 16px; line-height: 1.6; color: #333333;">
-                                    Hello <strong style="color: #667eea;">${username}</strong>,
+                                    Hello <strong style="color: #f5576c;">${username}</strong>,
                                 </p>
                                 
                                 <p style="margin: 0 0 30px; font-size: 16px; line-height: 1.6; color: #666666;">
-                                    Thank you for creating an account with <strong>E-Commerce App</strong>. To complete your registration and access all features, please verify your email address using the code below:
+                                    We received a request to reset the password for your <strong>E-Commerce App</strong> account. Use the verification code below to proceed with resetting your password:
                                 </p>
                                 
                                 <!-- OTP Box -->
                                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%">
                                     <tr>
-                                        <td style="padding: 30px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 8px; text-align: center;">
+                                        <td style="padding: 30px; background: linear-gradient(135deg, #ffecd2 0%, #fcb69f 100%); border-radius: 8px; text-align: center; border: 3px dashed #f5576c;">
                                             <p style="margin: 0 0 10px; font-size: 14px; color: #666666; text-transform: uppercase; letter-spacing: 1px; font-weight: 600;">
-                                                Your Verification Code
+                                                Your Reset Code
                                             </p>
-                                            <p style="margin: 0; font-size: 40px; font-weight: 700; color: #667eea; letter-spacing: 8px; font-family: 'Courier New', monospace;">
+                                            <p style="margin: 0; font-size: 40px; font-weight: 700; color: #f5576c; letter-spacing: 8px; font-family: 'Courier New', monospace;">
                                                 ${otp}
                                             </p>
                                         </td>
                                     </tr>
                                 </table>
                                 
-                                <!-- Info Box -->
+                                <!-- Timer Info -->
                                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top: 30px;">
                                     <tr>
                                         <td style="padding: 20px; background-color: #fff3cd; border-left: 4px solid #ffc107; border-radius: 4px;">
                                             <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #856404;">
-                                                <strong>⏱️ Important:</strong> This code will expire in <strong>10 minutes</strong>. Please verify your email promptly.
+                                                <strong>⏰ Time Sensitive:</strong> This code will expire in <strong>10 minutes</strong>. Complete your password reset promptly.
                                             </p>
                                         </td>
                                     </tr>
                                 </table>
                                 
-                                <!-- Security Notice -->
+                                <!-- Security Warning -->
                                 <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top: 20px;">
                                     <tr>
                                         <td style="padding: 20px; background-color: #f8d7da; border-left: 4px solid #dc3545; border-radius: 4px;">
-                                            <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #721c24;">
-                                                <strong>🔒 Security Tip:</strong> Never share this code with anyone. Our team will never ask for your verification code.
+                                            <p style="margin: 0 0 10px; font-size: 14px; line-height: 1.6; color: #721c24;">
+                                                <strong>⚠️ Security Alert:</strong>
                                             </p>
+                                            <ul style="margin: 0; padding-left: 20px; font-size: 14px; line-height: 1.6; color: #721c24;">
+                                                <li>Never share this code with anyone</li>
+                                                <li>Our team will never ask for your reset code</li>
+                                                <li>If you didn't request this, <strong>secure your account immediately</strong></li>
+                                            </ul>
                                         </td>
                                     </tr>
                                 </table>
                                 
-                                <p style="margin: 30px 0 0; font-size: 14px; line-height: 1.6; color: #999999;">
-                                    If you didn't create an account with us, please ignore this email or contact our support team if you have concerns.
-                                </p>
+                                <!-- Action Box -->
+                                <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="margin-top: 30px;">
+                                    <tr>
+                                        <td style="padding: 20px; background-color: #d1ecf1; border-left: 4px solid #0c5460; border-radius: 4px;">
+                                            <p style="margin: 0; font-size: 14px; line-height: 1.6; color: #0c5460;">
+                                                <strong>📱 Didn't request this?</strong><br/>
+                                                If you didn't initiate this password reset, please:
+                                            </p>
+                                            <ol style="margin: 10px 0 0; padding-left: 20px; font-size: 14px; line-height: 1.6; color: #0c5460;">
+                                                <li>Ignore this email</li>
+                                                <li>Change your password immediately</li>
+                                                <li>Contact support at <a href="mailto:support@ecommerce.com" style="color: #0c5460; font-weight: 600;">support@ecommerce.com</a></li>
+                                            </ol>
+                                        </td>
+                                    </tr>
+                                </table>
                             </td>
                         </tr>
                         
@@ -86,14 +104,14 @@ const VerificationEmailTemplate = (username, otp) => {
                         <tr>
                             <td style="padding: 30px; background-color: #f8f9fa; border-radius: 0 0 8px 8px; text-align: center;">
                                 <p style="margin: 0 0 10px; font-size: 14px; color: #666666;">
-                                    Best regards,<br/>
-                                    <strong style="color: #667eea;">E-Commerce App Team</strong>
+                                    Stay secure,<br/>
+                                    <strong style="color: #f5576c;">E-Commerce App Security Team</strong>
                                 </p>
                                 
                                 <div style="margin: 20px 0; padding-top: 20px; border-top: 1px solid #dee2e6;">
                                     <p style="margin: 0 0 10px; font-size: 12px; color: #999999;">
-                                        Need help? Contact us at 
-                                        <a href="mailto:support@ecommerce.com" style="color: #667eea; text-decoration: none;">support@ecommerce.com</a>
+                                        Questions? Contact us at 
+                                        <a href="mailto:support@ecommerce.com" style="color: #f5576c; text-decoration: none;">support@ecommerce.com</a>
                                     </p>
                                     <p style="margin: 0; font-size: 11px; color: #adb5bd;">
                                         &copy; ${new Date().getFullYear()} E-Commerce App. All rights reserved.
@@ -103,6 +121,19 @@ const VerificationEmailTemplate = (username, otp) => {
                         </tr>
                         
                     </table>
+                    
+                    <!-- Extra Info -->
+                    <table role="presentation" cellspacing="0" cellpadding="0" border="0" width="100%" style="max-width: 600px; margin: 20px auto 0;">
+                        <tr>
+                            <td style="text-align: center; padding: 0 20px;">
+                                <p style="margin: 0; font-size: 11px; line-height: 1.6; color: #999999;">
+                                    This is an automated message. Please do not reply to this email.<br/>
+                                    For assistance, visit our <a href="#" style="color: #f5576c; text-decoration: none;">Help Center</a>
+                                </p>
+                            </td>
+                        </tr>
+                    </table>
+                    
                 </td>
             </tr>
         </table>
@@ -111,4 +142,4 @@ const VerificationEmailTemplate = (username, otp) => {
     `;
 }
 
-export default VerificationEmailTemplate;
+export default ForgotPasswordTemplate;

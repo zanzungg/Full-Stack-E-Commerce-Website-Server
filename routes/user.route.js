@@ -6,7 +6,11 @@ import {
     uploadAvatarController, 
     verifyEmailController,
     getUserProfileController,
-    updateUserProfileController
+    updateUserProfileController,
+    forgotPasswordController,
+    verifyResetCodeController,
+    resetPasswordController,
+    refreshTokenController
 } from "../controllers/user.controller.js";
 import { deleteImageController } from "../controllers/image.controller.js";
 import auth from "../middlewares/auth.js";
@@ -19,6 +23,12 @@ userRouter.post("/register", registerUserController);
 userRouter.post("/verify-email", verifyEmailController);
 userRouter.post("/login", loginUserController);
 userRouter.post("/logout", auth, logoutUserController);
+userRouter.post("/refresh-token", refreshTokenController);
+
+// Password reset routes
+userRouter.post("/forgot-password", forgotPasswordController);
+userRouter.post("/verify-reset-code", verifyResetCodeController);
+userRouter.post("/reset-password", resetPasswordController);
 
 // Profile routes
 userRouter.get("/profile", auth, getUserProfileController);

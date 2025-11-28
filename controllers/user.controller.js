@@ -6,6 +6,7 @@ import VerificationEmailTemplate from "../utils/verifyEmailTemplate.js";
 import generateAccessToken from "../utils/generatedAccessToken.js";
 import generateRefreshToken from "../utils/generatedRefreshToken.js";
 import { uploadAvatar, deleteImage } from "../utils/cloudinary.js";
+import ForgotPasswordTemplate from "../utils/forgotPasswordTemplate.js";
 
 import { v2 as cloudinary } from "cloudinary";
 import fs from "fs";
@@ -455,6 +456,302 @@ export async function updateUserProfileController(req, res) {
     } catch (error) {
         return res.status(500).json({
             message: error.message || error,
+            error: true,
+            success: false
+        });
+    }
+}
+
+// Forgot Password Controller
+export async function forgotPasswordController(req, res) {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({
+                message: 'Email is required',
+                error: true,
+                success: false
+            });
+        }
+
+        const user = await UserModel.findOne({ email });
+        if (!user) {
+            return res.status(200).json({
+                message: 'If your email is registered, you will receive a password reset code',
+                error: false,
+                success: true
+            });
+        }
+
+        if (user.status !== 'Active') {
+            return res.status(403).json({
+                message: 'Account is not active',
+                error: true,
+                success: false
+            });
+        }
+
+        const resetCode = Math.floor(100000 + Math.random() * 900000).toString();
+
+        user.otp = resetCode;
+        user.otp_expiry = Date.now() + 10 * 60 * 1000;
+        await user.save();
+
+        try {
+            await sendVerificationEmail({
+                sendTo: user.email,
+                subject: 'Password Reset Request - E-Commerce App',
+                text: 'You requested a password reset. Use the OTP code to reset your password.',
+                html: ForgotPasswordTemplate(user.name, resetCode)
+            });
+
+            return res.status(200).json({
+                message: 'Password reset code sent to your email',
+                error: false,
+                success: true
+            });
+
+        } catch (emailError) {
+            console.error('Failed to send reset email:', emailError);
+            
+            user.otp = null;
+            user.otp_expiry = null;
+            await user.save();
+
+            return res.status(500).json({
+                message: 'Failed to send password reset email. Please try again.',
+                error: true,
+                success: false
+            });
+        }
+
+    } catch (error) {
+        return res.status(500).json({
+            message: error.message || 'Internal server error',
+            error: true,
+            success: false
+        });
+    }
+}
+
+// Verify Reset Code Controller
+export async function verifyResetCodeController(req, res) {
+    try {
+        const { email, otp } = req.body;
+
+        // Validate inputs
+        if (!email || !otp) {
+            return res.status(400).json({
+                message: 'Email and OTP are required',
+                error: true,
+                success: false
+            });
+        }
+
+        // Find user
+        const user = await UserModel.findOne({ email });
+        if (!user) {
+            return res.status(404).json({
+                message: 'User not found',
+                error: true,
+                success: false
+            });
+        }
+
+        // Verify OTP
+        const isCodeValid = user.otp === otp;
+        const isNotExpired = user.otp_expiry > Date.now();
+
+        if (!isCodeValid || !isNotExpired) {
+            return res.status(400).json({
+                message: 'Invalid or expired OTP',
+                error: true,
+                success: false
+            });
+        }
+
+        // Generate temporary token for password reset
+        const resetToken = jwt.sign(
+            { email: user.email, id: user._id, purpose: 'password-reset' },
+            process.env.JWT_SECRET,
+            { expiresIn: '15m' } // 15 minutes to complete password reset
+        );
+
+        return res.status(200).json({
+            message: 'OTP verified successfully',
+            error: false,
+            success: true,
+            resetToken
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: error.message || 'Internal server error',
+            error: true,
+            success: false
+        });
+    }
+}
+
+// Reset Password Controller
+export async function resetPasswordController(req, res) {
+    try {
+        const { resetToken, newPassword } = req.body;
+
+        // Validate inputs
+        if (!resetToken || !newPassword) {
+            return res.status(400).json({
+                message: 'Reset token and new password are required',
+                error: true,
+                success: false
+            });
+        }
+
+        // Validate password strength
+        if (newPassword.length < 6) {
+            return res.status(400).json({
+                message: 'Password must be at least 6 characters long',
+                error: true,
+                success: false
+            });
+        }
+
+        // Verify reset token
+        let decoded;
+        try {
+            decoded = jwt.verify(resetToken, process.env.JWT_SECRET);
+            
+            // Check if token is for password reset
+            if (decoded.purpose !== 'password-reset') {
+                throw new Error('Invalid token purpose');
+            }
+        } catch (jwtError) {
+            return res.status(401).json({
+                message: 'Invalid or expired reset token',
+                error: true,
+                success: false
+            });
+        }
+
+        // Find user
+        const user = await UserModel.findById(decoded.id);
+        if (!user) {
+            return res.status(404).json({
+                message: 'User not found',
+                error: true,
+                success: false
+            });
+        }
+
+        // Hash new password
+        const salt = await bcrypt.genSalt(10);
+        const hashedPassword = await bcrypt.hash(newPassword, salt);
+
+        // Update password and clear OTP
+        user.password = hashedPassword;
+        user.otp = null;
+        user.otp_expiry = null;
+        user.refresh_token = ""; // Clear refresh token for security
+        await user.save();
+
+        return res.status(200).json({
+            message: 'Password reset successfully. Please login with your new password.',
+            error: false,
+            success: true
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: error.message || 'Internal server error',
+            error: true,
+            success: false
+        });
+    }
+}
+
+// Refresh Token Controller
+export async function refreshTokenController(req, res) {
+    try {
+        const refreshToken = req.cookies.refreshToken || req.body.refreshToken;
+
+        if (!refreshToken) {
+            return res.status(401).json({
+                message: 'Refresh token is required',
+                error: true,
+                success: false
+            });
+        }
+
+        // Verify refresh token
+        let decoded;
+        try {
+            decoded = jwt.verify(refreshToken, process.env.SECRET_KEY_REFRESH_TOKEN);
+        } catch (jwtError) {
+            return res.status(401).json({
+                message: 'Invalid or expired refresh token',
+                error: true,
+                success: false
+            });
+        }
+
+        // Find user and check if refresh token matches
+        const user = await UserModel.findById(decoded.id);
+        if (!user) {
+            return res.status(404).json({
+                message: 'User not found',
+                error: true,
+                success: false
+            });
+        }
+
+        // Verify the refresh token matches the one stored in database
+        if (user.refresh_token !== refreshToken) {
+            return res.status(401).json({
+                message: 'Invalid refresh token',
+                error: true,
+                success: false
+            });
+        }
+
+        // Check if user account is active
+        if (user.status !== 'Active') {
+            return res.status(403).json({
+                message: 'User account is not active',
+                error: true,
+                success: false
+            });
+        }
+
+        // Generate new access token
+        const newAccessToken = await generateAccessToken(user);
+
+        // Optionally generate new refresh token for rotation
+        const newRefreshToken = await generateRefreshToken(user);
+
+        // Set cookies
+        const cookiesOptions = {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'None',
+        };
+
+        res.cookie('accessToken', newAccessToken, cookiesOptions);
+        res.cookie('refreshToken', newRefreshToken, cookiesOptions);
+
+        return res.status(200).json({
+            message: 'Token refreshed successfully',
+            error: false,
+            success: true,
+            data: {
+                accessToken: newAccessToken,
+                refreshToken: newRefreshToken
+            }
+        });
+
+    } catch (error) {
+        return res.status(500).json({
+            message: error.message || 'Internal server error',
             error: true,
             success: false
         });
