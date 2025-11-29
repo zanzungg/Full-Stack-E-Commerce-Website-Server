@@ -39,6 +39,35 @@ export async function uploadAvatar(filePath, userId) {
 }
 
 /**
+ * Upload category image to Cloudinary
+ * @param {string} filePath - Local file path
+ * @param {string} categoryId - Category ID for unique naming
+ * @returns {Promise<{url: string, publicId: string}>}
+ */
+export async function uploadCategoryImage(filePath, categoryId) {
+    try {
+        const result = await cloudinary.uploader.upload(filePath, {
+            folder: 'categories',
+            public_id: `category_${categoryId}_${Date.now()}`,
+            transformation: [
+                { width: 800, height: 600, crop: 'limit' },
+                { quality: 'auto:good', fetch_format: 'auto' }
+            ]
+        });
+
+        return {
+            url: result.secure_url,
+            publicId: result.public_id
+        };
+    } finally {
+        // Always cleanup local file
+        if (fs.existsSync(filePath)) {
+            fs.unlinkSync(filePath);
+        }
+    }
+}
+
+/**
  * Delete image from Cloudinary
  * @param {string} publicId - Cloudinary public ID
  * @returns {Promise<boolean>}
