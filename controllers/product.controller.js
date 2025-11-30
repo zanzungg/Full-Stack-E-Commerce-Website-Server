@@ -1,8 +1,19 @@
 import ProductModel from "../models/product.model.js";
-import CategoryModel from "../models/category.model.js"; // Thêm import
+import CategoryModel from "../models/category.model.js";
 import fs from 'fs';
 import { uploadProductImage, deleteImage } from "../utils/cloudinary.js";
 import mongoose from 'mongoose';
+import {
+  buildProductFilter,
+  buildSortObject,
+  getAvailableFilters,
+  validatePaginationParams,
+  buildPaginationMetadata,
+  fetchProducts,
+  buildAppliedFilters,
+  getProductsByField,
+  getThirdSubCategories
+} from '../helpers/product.helper.js';
 
 /**
  * @desc    Create a new product with images
@@ -444,232 +455,91 @@ export async function uploadImages(req, res) {
  * @access  Public
  */
 export async function getAllProducts(req, res) {
-    try {
-        // ================ EXTRACT QUERY PARAMETERS ================
-        const {
-            page = 1,
-            limit = 10,
-            sort = '-createdAt',
-            search = '',
-            category,
-            catId,
-            subCatId,
-            thirdSubCatId,
-            brand,
-            minPrice,
-            maxPrice,
-            isFeatured,
-            inStock,
-            rating,
-            location,
-            discount,
-            productRam,
-            size,
-            productWeight
-        } = req.query;
+  try {
+    const { search = '', category, catId, subCatId, thirdSubCatId } = req.query;
+    
+    // Validate pagination
+    const { pageNum, limitNum, errors } = validatePaginationParams(
+        req.query.page,
+        req.query.limit
+    );
 
-        // ================ VALIDATE QUERY PARAMETERS ================
-        
-        const pageNum = parseInt(page);
-        const limitNum = parseInt(limit);
-
-        if (isNaN(pageNum) || pageNum < 1) {
-            return res.status(400).json({
-                message: 'Invalid page number. Must be a positive integer',
-                error: true,
-                success: false
-            });
-        }
-
-        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
-            return res.status(400).json({
-                message: 'Invalid limit. Must be between 1 and 100',
-                error: true,
-                success: false
-            });
-        }
-
-        // ================ BUILD FILTER OBJECT ================
-        
-        const filter = {};
-
-        // Text search (name and description)
-        if (search && search.trim()) {
-            filter.$or = [
-                { name: { $regex: search.trim(), $options: 'i' } },
-                { description: { $regex: search.trim(), $options: 'i' } },
-                { brand: { $regex: search.trim(), $options: 'i' } }
-            ];
-        }
-
-        // Category filters
-        if (category) {
-            if (mongoose.Types.ObjectId.isValid(category)) {
-                filter.category = category;
-            }
-        }
-
-        if (catId) {
-            filter.catId = catId;
-        }
-
-        if (subCatId) {
-            filter.subCatId = subCatId;
-        }
-
-        if (thirdSubCatId) {
-            filter.thirdSubCatId = thirdSubCatId;
-        }
-
-        // Brand filter
-        if (brand) {
-            filter.brand = { $regex: brand.trim(), $options: 'i' };
-        }
-
-        // Price range filter
-        if (minPrice || maxPrice) {
-            filter.price = {};
-            if (minPrice) {
-                const minPriceNum = parseFloat(minPrice);
-                if (!isNaN(minPriceNum) && minPriceNum >= 0) {
-                    filter.price.$gte = minPriceNum;
-                }
-            }
-            if (maxPrice) {
-                const maxPriceNum = parseFloat(maxPrice);
-                if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
-                    filter.price.$lte = maxPriceNum;
-                }
-            }
-        }
-
-        // Featured products filter
-        if (isFeatured !== undefined) {
-            filter.isFeatured = isFeatured === 'true' || isFeatured === true;
-        }
-
-        // In stock filter
-        if (inStock !== undefined) {
-            if (inStock === 'true' || inStock === true) {
-                filter.countInStock = { $gt: 0 };
-            } else {
-                filter.countInStock = 0;
-            }
-        }
-
-        // Rating filter
-        if (rating) {
-            const ratingNum = parseFloat(rating);
-            if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
-                filter.rating = { $gte: ratingNum };
-            }
-        }
-
-        // Location filter
-        if (location) {
-            filter['location.value'] = { $regex: location.trim(), $options: 'i' };
-        }
-
-        // Discount filter
-        if (discount) {
-            const discountNum = parseFloat(discount);
-            if (!isNaN(discountNum) && discountNum >= 0) {
-                filter.discount = { $gte: discountNum };
-            }
-        }
-
-        // Product RAM filter
-        if (productRam) {
-            filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
-        }
-
-        // Size filter
-        if (size) {
-            filter.size = { $in: size.split(',').map(s => s.trim()) };
-        }
-
-        // Product weight filter
-        if (productWeight) {
-            filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
-        }
-
-        // ================ BUILD SORT OBJECT ================
-        
-        let sortObj = {};
-        
-        // Parse sort parameter (format: field or -field for descending)
-        if (sort) {
-            const sortFields = sort.split(',');
-            sortFields.forEach(field => {
-                if (field.startsWith('-')) {
-                    sortObj[field.substring(1)] = -1; // Descending
-                } else {
-                    sortObj[field] = 1; // Ascending
-                }
-            });
-        } else {
-            sortObj = { createdAt: -1 }; // Default sort by newest
-        }
-
-        // ================ EXECUTE QUERY ================
-        
-        const skip = (pageNum - 1) * limitNum;
-
-        // Get total count for pagination
-        const totalProducts = await ProductModel.countDocuments(filter);
-        const totalPages = Math.ceil(totalProducts / limitNum);
-
-        // Get products with pagination
-        const products = await ProductModel
-            .find(filter)
-            .sort(sortObj)
-            .skip(skip)
-            .limit(limitNum)
-            .populate('category', 'name slug color') // Populate category details
-            .select('-__v') // Exclude version key
-            .lean(); // Convert to plain JavaScript objects for better performance
-
-        // ================ PREPARE RESPONSE ================
-        
-        return res.status(200).json({
-            message: 'Products retrieved successfully',
-            error: false,
-            success: true,
-            data: products,
-            pagination: {
-                currentPage: pageNum,
-                totalPages,
-                totalProducts,
-                limit: limitNum,
-                hasNextPage: pageNum < totalPages,
-                hasPrevPage: pageNum > 1,
-                nextPage: pageNum < totalPages ? pageNum + 1 : null,
-                prevPage: pageNum > 1 ? pageNum - 1 : null
-            },
-            filters: {
-                search: search || null,
-                category: category || null,
-                catId: catId || null,
-                subCatId: subCatId || null,
-                thirdSubCatId: thirdSubCatId || null,
-                brand: brand || null,
-                priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
-                isFeatured: isFeatured !== undefined ? isFeatured : null,
-                inStock: inStock !== undefined ? inStock : null,
-                rating: rating || null,
-                discount: discount || null
-            }
-        });
-
-    } catch (error) {
-        console.error('Get All Products Error:', error);
-
-        return res.status(500).json({
-            message: error.message || 'Failed to retrieve products',
+    if (errors.length > 0) {
+        return res.status(400).json({
+            message: errors.join(', '),
             error: true,
             success: false
         });
     }
+
+    // Build base filter
+    const baseFilter = {};
+
+    // Text search
+    if (search && search.trim()) {
+        baseFilter.$or = [
+            { name: { $regex: search.trim(), $options: 'i' } },
+            { description: { $regex: search.trim(), $options: 'i' } },
+            { brand: { $regex: search.trim(), $options: 'i' } }
+        ];
+    }
+
+    // Category filters
+    if (category && mongoose.Types.ObjectId.isValid(category)) {
+        baseFilter.category = category;
+    }
+    if (catId) baseFilter.catId = catId;
+    if (subCatId) baseFilter.subCatId = subCatId;
+    if (thirdSubCatId) baseFilter.thirdSubCatId = thirdSubCatId;
+
+    // Build full filter with query params
+    const filter = await buildProductFilter(baseFilter, req.query);
+    
+    // Build sort object
+    const sortObj = buildSortObject(req.query.sort);
+
+    // Fetch products
+    const { totalProducts, products } = await fetchProducts(
+        filter,
+        sortObj,
+        pageNum,
+        limitNum
+    );
+
+    // Build pagination metadata
+    const pagination = buildPaginationMetadata(pageNum, limitNum, totalProducts);
+
+    // Get available filters
+    const availableFilters = await getAvailableFilters(baseFilter);
+
+    // Build applied filters (custom for getAllProducts)
+    const appliedFilters = {
+        search: search || null,
+        category: category || null,
+        catId: catId || null,
+        subCatId: subCatId || null,
+        thirdSubCatId: thirdSubCatId || null,
+        ...buildAppliedFilters(req.query)
+    };
+    
+    return res.status(200).json({
+        message: 'Products retrieved successfully',
+        error: false,
+        success: true,
+        data: products,
+        pagination,
+        appliedFilters,
+        availableFilters
+    });
+  } catch (error) {
+    console.error('Get All Products Error:', error);
+
+    return res.status(500).json({
+        message: error.message || 'Failed to retrieve products',
+        error: true,
+        success: false
+    });
+  }
 }
 
 /**
@@ -773,1067 +643,57 @@ export async function getFeaturedProducts(req, res) {
  * @access  Public
  */
 export async function getProductsByCategory(req, res) {
-    try {
-        const { categoryId } = req.params;
-        const { page = 1, limit = 10, sort = '-createdAt' } = req.query;
-
-        // Validate category ID
-        if (!mongoose.Types.ObjectId.isValid(categoryId)) {
-            return res.status(400).json({
-                message: 'Invalid category ID format',
-                error: true,
-                success: false
-            });
-        }
-
-        const pageNum = parseInt(page);
-        const limitNum = parseInt(limit);
-        const skip = (pageNum - 1) * limitNum;
-
-        // Build sort object
-        let sortObj = {};
-        if (sort.startsWith('-')) {
-            sortObj[sort.substring(1)] = -1;
-        } else {
-            sortObj[sort] = 1;
-        }
-
-        const totalProducts = await ProductModel.countDocuments({ category: categoryId });
-        const totalPages = Math.ceil(totalProducts / limitNum);
-
-        const products = await ProductModel
-            .find({ category: categoryId })
-            .sort(sortObj)
-            .skip(skip)
-            .limit(limitNum)
-            .populate('category', 'name slug color')
-            .select('-__v')
-            .lean();
-
-        return res.status(200).json({
-            message: 'Products retrieved successfully',
-            error: false,
-            success: true,
-            data: products,
-            pagination: {
-                currentPage: pageNum,
-                totalPages,
-                totalProducts,
-                limit: limitNum,
-                hasNextPage: pageNum < totalPages,
-                hasPrevPage: pageNum > 1
-            }
-        });
-
-    } catch (error) {
-        console.error('Get Products By Category Error:', error);
-
-        return res.status(500).json({
-            message: error.message || 'Failed to retrieve products',
-            error: true,
-            success: false
-        });
-    }
-}
-
-/**
- * @desc    Get all products by catId
- * @route   GET /api/products/catId/:catId
- * @access  Public
- */
-export async function getProductsByCatId(req, res) {
-    try {
-        const { catId } = req.params;
-        const {
-            page = 1,
-            limit = 10,
-            sort = '-createdAt',
-            minPrice,
-            maxPrice,
-            brand,
-            rating,
-            inStock,
-            discount,
-            productRam,
-            size,
-            productWeight,
-            location
-        } = req.query;
-
-        // ================ VALIDATE PARAMETERS ================
-        
-        if (!catId || !catId.trim()) {
-            return res.status(400).json({
-                message: 'Category ID is required',
-                error: true,
-                success: false
-            });
-        }
-
-        const pageNum = parseInt(page);
-        const limitNum = parseInt(limit);
-
-        if (isNaN(pageNum) || pageNum < 1) {
-            return res.status(400).json({
-                message: 'Invalid page number. Must be a positive integer',
-                error: true,
-                success: false
-            });
-        }
-
-        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
-            return res.status(400).json({
-                message: 'Invalid limit. Must be between 1 and 100',
-                error: true,
-                success: false
-            });
-        }
-
-        // ================ BUILD FILTER OBJECT ================
-        
-        const filter = { catId: catId.trim() };
-
-        // Price range filter
-        if (minPrice || maxPrice) {
-            filter.price = {};
-            if (minPrice) {
-                const minPriceNum = parseFloat(minPrice);
-                if (!isNaN(minPriceNum) && minPriceNum >= 0) {
-                    filter.price.$gte = minPriceNum;
-                }
-            }
-            if (maxPrice) {
-                const maxPriceNum = parseFloat(maxPrice);
-                if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
-                    filter.price.$lte = maxPriceNum;
-                }
-            }
-        }
-
-        // Brand filter
-        if (brand) {
-            filter.brand = { $regex: brand.trim(), $options: 'i' };
-        }
-
-        // Rating filter
-        if (rating) {
-            const ratingNum = parseFloat(rating);
-            if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
-                filter.rating = { $gte: ratingNum };
-            }
-        }
-
-        // In stock filter
-        if (inStock !== undefined) {
-            if (inStock === 'true' || inStock === true) {
-                filter.countInStock = { $gt: 0 };
-            } else if (inStock === 'false' || inStock === false) {
-                filter.countInStock = 0;
-            }
-        }
-
-        // Discount filter
-        if (discount) {
-            const discountNum = parseFloat(discount);
-            if (!isNaN(discountNum) && discountNum >= 0) {
-                filter.discount = { $gte: discountNum };
-            }
-        }
-
-        // Product RAM filter (multiple values)
-        if (productRam) {
-            filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
-        }
-
-        // Size filter (multiple values)
-        if (size) {
-            filter.size = { $in: size.split(',').map(s => s.trim()) };
-        }
-
-        // Product weight filter (multiple values)
-        if (productWeight) {
-            filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
-        }
-
-        // Location filter
-        if (location) {
-            filter['location.value'] = { $regex: location.trim(), $options: 'i' };
-        }
-
-        // ================ BUILD SORT OBJECT ================
-        
-        let sortObj = {};
-        
-        if (sort) {
-            const sortFields = sort.split(',');
-            sortFields.forEach(field => {
-                if (field.startsWith('-')) {
-                    sortObj[field.substring(1)] = -1; // Descending
-                } else {
-                    sortObj[field] = 1; // Ascending
-                }
-            });
-        } else {
-            sortObj = { createdAt: -1 }; // Default: newest first
-        }
-
-        // ================ EXECUTE QUERY ================
-        
-        const skip = (pageNum - 1) * limitNum;
-
-        // Get total count
-        const totalProducts = await ProductModel.countDocuments(filter);
-        const totalPages = Math.ceil(totalProducts / limitNum);
-
-        // Return 404 if no products found on first page
-        if (totalProducts === 0 && pageNum === 1) {
-            return res.status(404).json({
-                message: 'No products found for this category ID',
-                error: true,
-                success: false,
-                data: [],
-                pagination: {
-                    currentPage: pageNum,
-                    totalPages: 0,
-                    totalProducts: 0,
-                    limit: limitNum,
-                    hasNextPage: false,
-                    hasPrevPage: false,
-                    nextPage: null,
-                    prevPage: null
-                }
-            });
-        }
-
-        // Get products with pagination
-        const products = await ProductModel
-            .find(filter)
-            .sort(sortObj)
-            .skip(skip)
-            .limit(limitNum)
-            .populate('category', 'name slug color')
-            .select('-__v')
-            .lean();
-
-        // ================ GET FILTER AGGREGATIONS ================
-        
-        // Get available brands for this catId
-        const availableBrands = await ProductModel.distinct('brand', { catId: catId.trim(), brand: { $ne: '' } });
-        
-        // Get price range
-        const priceRange = await ProductModel.aggregate([
-            { $match: { catId: catId.trim() } },
-            {
-                $group: {
-                    _id: null,
-                    minPrice: { $min: '$price' },
-                    maxPrice: { $max: '$price' }
-                }
-            }
-        ]);
-
-        // Get available RAM options
-        const availableRam = await ProductModel.distinct('productRam', { catId: catId.trim() });
-        
-        // Get available sizes
-        const availableSizes = await ProductModel.distinct('size', { catId: catId.trim() });
-
-        // ================ PREPARE RESPONSE ================
-        
-        return res.status(200).json({
-            message: 'Products retrieved successfully',
-            error: false,
-            success: true,
-            data: products,
-            pagination: {
-                currentPage: pageNum,
-                totalPages,
-                totalProducts,
-                limit: limitNum,
-                hasNextPage: pageNum < totalPages,
-                hasPrevPage: pageNum > 1,
-                nextPage: pageNum < totalPages ? pageNum + 1 : null,
-                prevPage: pageNum > 1 ? pageNum - 1 : null
-            },
-            appliedFilters: {
-                catId: catId.trim(),
-                brand: brand || null,
-                priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
-                rating: rating || null,
-                inStock: inStock !== undefined ? inStock : null,
-                discount: discount || null,
-                productRam: productRam || null,
-                size: size || null,
-                productWeight: productWeight || null,
-                location: location || null
-            },
-            availableFilters: {
-                brands: availableBrands.sort(),
-                priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
-                ramOptions: availableRam.flat().filter(Boolean).sort(),
-                sizeOptions: availableSizes.flat().filter(Boolean).sort()
-            }
-        });
-
-    } catch (error) {
-        console.error('Get Products By CatId Error:', error);
-
-        return res.status(500).json({
-            message: error.message || 'Failed to retrieve products',
-            error: true,
-            success: false
-        });
-    }
-}
-
-/**
- * @desc    Get all products by subCatId (with advanced filtering)
- * @route   GET /api/products/subCatId/:subCatId
- * @access  Public
- */
-export async function getProductsBySubCatId(req, res) {
-    try {
-        const { subCatId } = req.params;
-        const {
-            page = 1,
-            limit = 10,
-            sort = '-createdAt',
-            minPrice,
-            maxPrice,
-            brand,
-            rating,
-            inStock,
-            discount,
-            productRam,
-            size,
-            productWeight
-        } = req.query;
-
-        // ================ VALIDATE PARAMETERS ================
-        
-        if (!subCatId || !subCatId.trim()) {
-            return res.status(400).json({
-                message: 'Sub-category ID is required',
-                error: true,
-                success: false
-            });
-        }
-
-        const pageNum = parseInt(page);
-        const limitNum = parseInt(limit);
-
-        if (isNaN(pageNum) || pageNum < 1) {
-            return res.status(400).json({
-                message: 'Invalid page number. Must be a positive integer',
-                error: true,
-                success: false
-            });
-        }
-
-        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
-            return res.status(400).json({
-                message: 'Invalid limit. Must be between 1 and 100',
-                error: true,
-                success: false
-            });
-        }
-
-        // ================ BUILD FILTER OBJECT ================
-        
-        const filter = { subCatId: subCatId.trim() };
-
-        // Price range filter
-        if (minPrice || maxPrice) {
-            filter.price = {};
-            if (minPrice) {
-                const minPriceNum = parseFloat(minPrice);
-                if (!isNaN(minPriceNum) && minPriceNum >= 0) {
-                    filter.price.$gte = minPriceNum;
-                }
-            }
-            if (maxPrice) {
-                const maxPriceNum = parseFloat(maxPrice);
-                if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
-                    filter.price.$lte = maxPriceNum;
-                }
-            }
-        }
-
-        // Brand filter
-        if (brand) {
-            filter.brand = { $regex: brand.trim(), $options: 'i' };
-        }
-
-        // Rating filter
-        if (rating) {
-            const ratingNum = parseFloat(rating);
-            if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
-                filter.rating = { $gte: ratingNum };
-            }
-        }
-
-        // In stock filter
-        if (inStock !== undefined) {
-            if (inStock === 'true' || inStock === true) {
-                filter.countInStock = { $gt: 0 };
-            } else if (inStock === 'false' || inStock === false) {
-                filter.countInStock = 0;
-            }
-        }
-
-        // Discount filter
-        if (discount) {
-            const discountNum = parseFloat(discount);
-            if (!isNaN(discountNum) && discountNum >= 0) {
-                filter.discount = { $gte: discountNum };
-            }
-        }
-
-        // Product RAM filter
-        if (productRam) {
-            filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
-        }
-
-        // Size filter
-        if (size) {
-            filter.size = { $in: size.split(',').map(s => s.trim()) };
-        }
-
-        // Product weight filter
-        if (productWeight) {
-            filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
-        }
-
-        // ================ BUILD SORT OBJECT ================
-        
-        let sortObj = {};
-        
-        if (sort) {
-            const sortFields = sort.split(',');
-            sortFields.forEach(field => {
-                if (field.startsWith('-')) {
-                    sortObj[field.substring(1)] = -1;
-                } else {
-                    sortObj[field] = 1;
-                }
-            });
-        } else {
-            sortObj = { createdAt: -1 };
-        }
-
-        // ================ EXECUTE QUERY ================
-        
-        const skip = (pageNum - 1) * limitNum;
-
-        const totalProducts = await ProductModel.countDocuments(filter);
-        const totalPages = Math.ceil(totalProducts / limitNum);
-
-        if (totalProducts === 0 && pageNum === 1) {
-            return res.status(404).json({
-                message: 'No products found for this sub-category ID',
-                error: true,
-                success: false,
-                data: [],
-                pagination: {
-                    currentPage: pageNum,
-                    totalPages: 0,
-                    totalProducts: 0,
-                    limit: limitNum,
-                    hasNextPage: false,
-                    hasPrevPage: false
-                }
-            });
-        }
-
-        const products = await ProductModel
-            .find(filter)
-            .sort(sortObj)
-            .skip(skip)
-            .limit(limitNum)
-            .populate('category', 'name slug color')
-            .select('-__v')
-            .lean();
-
-        // ================ GET FILTER AGGREGATIONS ================
-        
-        const availableBrands = await ProductModel.distinct('brand', { subCatId: subCatId.trim(), brand: { $ne: '' } });
-        
-        const priceRange = await ProductModel.aggregate([
-            { $match: { subCatId: subCatId.trim() } },
-            {
-                $group: {
-                    _id: null,
-                    minPrice: { $min: '$price' },
-                    maxPrice: { $max: '$price' }
-                }
-            }
-        ]);
-
-        const availableRam = await ProductModel.distinct('productRam', { subCatId: subCatId.trim() });
-        const availableSizes = await ProductModel.distinct('size', { subCatId: subCatId.trim() });
-
-        // ================ PREPARE RESPONSE ================
-        
-        return res.status(200).json({
-            message: 'Products retrieved successfully',
-            error: false,
-            success: true,
-            data: products,
-            pagination: {
-                currentPage: pageNum,
-                totalPages,
-                totalProducts,
-                limit: limitNum,
-                hasNextPage: pageNum < totalPages,
-                hasPrevPage: pageNum > 1,
-                nextPage: pageNum < totalPages ? pageNum + 1 : null,
-                prevPage: pageNum > 1 ? pageNum - 1 : null
-            },
-            appliedFilters: {
-                subCatId: subCatId.trim(),
-                brand: brand || null,
-                priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
-                rating: rating || null,
-                inStock: inStock !== undefined ? inStock : null,
-                discount: discount || null,
-                productRam: productRam || null,
-                size: size || null,
-                productWeight: productWeight || null
-            },
-            availableFilters: {
-                brands: availableBrands.sort(),
-                priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
-                ramOptions: availableRam.flat().filter(Boolean).sort(),
-                sizeOptions: availableSizes.flat().filter(Boolean).sort()
-            }
-        });
-
-    } catch (error) {
-        console.error('Get Products By SubCatId Error:', error);
-
-        return res.status(500).json({
-            message: error.message || 'Failed to retrieve products',
-            error: true,
-            success: false
-        });
-    }
-}
-
-/**
- * @desc    Get all products by thirdSubCatId (with advanced filtering)
- * @route   GET /api/products/thirdSubCatId/:thirdSubCatId
- * @access  Public
- */
-export async function getProductsByThirdSubCatId(req, res) {
-    try {
-        const { thirdSubCatId } = req.params;
-        const {
-            page = 1,
-            limit = 10,
-            sort = '-createdAt',
-            minPrice,
-            maxPrice,
-            brand,
-            rating,
-            inStock,
-            discount,
-            productRam,
-            size,
-            productWeight
-        } = req.query;
-
-        // ================ VALIDATE PARAMETERS ================
-        
-        if (!thirdSubCatId || !thirdSubCatId.trim()) {
-            return res.status(400).json({
-                message: 'Third sub-category ID is required',
-                error: true,
-                success: false
-            });
-        }
-
-        const pageNum = parseInt(page);
-        const limitNum = parseInt(limit);
-
-        if (isNaN(pageNum) || pageNum < 1) {
-            return res.status(400).json({
-                message: 'Invalid page number. Must be a positive integer',
-                error: true,
-                success: false
-            });
-        }
-
-        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
-            return res.status(400).json({
-                message: 'Invalid limit. Must be between 1 and 100',
-                error: true,
-                success: false
-            });
-        }
-
-        // ================ BUILD FILTER OBJECT ================
-        
-        const filter = { thirdSubCatId: thirdSubCatId.trim() };
-
-        // Price range filter
-        if (minPrice || maxPrice) {
-            filter.price = {};
-            if (minPrice) {
-                const minPriceNum = parseFloat(minPrice);
-                if (!isNaN(minPriceNum) && minPriceNum >= 0) {
-                    filter.price.$gte = minPriceNum;
-                }
-            }
-            if (maxPrice) {
-                const maxPriceNum = parseFloat(maxPrice);
-                if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
-                    filter.price.$lte = maxPriceNum;
-                }
-            }
-        }
-
-        // Brand filter
-        if (brand) {
-            filter.brand = { $regex: brand.trim(), $options: 'i' };
-        }
-
-        // Rating filter
-        if (rating) {
-            const ratingNum = parseFloat(rating);
-            if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
-                filter.rating = { $gte: ratingNum };
-            }
-        }
-
-        // In stock filter
-        if (inStock !== undefined) {
-            if (inStock === 'true' || inStock === true) {
-                filter.countInStock = { $gt: 0 };
-            } else if (inStock === 'false' || inStock === false) {
-                filter.countInStock = 0;
-            }
-        }
-
-        // Discount filter
-        if (discount) {
-            const discountNum = parseFloat(discount);
-            if (!isNaN(discountNum) && discountNum >= 0) {
-                filter.discount = { $gte: discountNum };
-            }
-        }
-
-        // Product RAM filter
-        if (productRam) {
-            filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
-        }
-
-        // Size filter
-        if (size) {
-            filter.size = { $in: size.split(',').map(s => s.trim()) };
-        }
-
-        // Product weight filter
-        if (productWeight) {
-            filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
-        }
-
-        // ================ BUILD SORT OBJECT ================
-        
-        let sortObj = {};
-        
-        if (sort) {
-            const sortFields = sort.split(',');
-            sortFields.forEach(field => {
-                if (field.startsWith('-')) {
-                    sortObj[field.substring(1)] = -1;
-                } else {
-                    sortObj[field] = 1;
-                }
-            });
-        } else {
-            sortObj = { createdAt: -1 };
-        }
-
-        // ================ EXECUTE QUERY ================
-        
-        const skip = (pageNum - 1) * limitNum;
-
-        const totalProducts = await ProductModel.countDocuments(filter);
-        const totalPages = Math.ceil(totalProducts / limitNum);
-
-        if (totalProducts === 0 && pageNum === 1) {
-            return res.status(404).json({
-                message: 'No products found for this third sub-category ID',
-                error: true,
-                success: false,
-                data: [],
-                pagination: {
-                    currentPage: pageNum,
-                    totalPages: 0,
-                    totalProducts: 0,
-                    limit: limitNum,
-                    hasNextPage: false,
-                    hasPrevPage: false
-                }
-            });
-        }
-
-        const products = await ProductModel
-            .find(filter)
-            .sort(sortObj)
-            .skip(skip)
-            .limit(limitNum)
-            .populate('category', 'name slug color')
-            .select('-__v')
-            .lean();
-
-        // ================ GET FILTER AGGREGATIONS ================
-        
-        const availableBrands = await ProductModel.distinct('brand', { 
-            thirdSubCatId: thirdSubCatId.trim(), 
-            brand: { $ne: '' } 
-        });
-        
-        const priceRange = await ProductModel.aggregate([
-            { $match: { thirdSubCatId: thirdSubCatId.trim() } },
-            {
-                $group: {
-                    _id: null,
-                    minPrice: { $min: '$price' },
-                    maxPrice: { $max: '$price' }
-                }
-            }
-        ]);
-
-        const availableRam = await ProductModel.distinct('productRam', { thirdSubCatId: thirdSubCatId.trim() });
-        const availableSizes = await ProductModel.distinct('size', { thirdSubCatId: thirdSubCatId.trim() });
-
-        // ================ PREPARE RESPONSE ================
-        
-        return res.status(200).json({
-            message: 'Products retrieved successfully',
-            error: false,
-            success: true,
-            data: products,
-            pagination: {
-                currentPage: pageNum,
-                totalPages,
-                totalProducts,
-                limit: limitNum,
-                hasNextPage: pageNum < totalPages,
-                hasPrevPage: pageNum > 1,
-                nextPage: pageNum < totalPages ? pageNum + 1 : null,
-                prevPage: pageNum > 1 ? pageNum - 1 : null
-            },
-            appliedFilters: {
-                thirdSubCatId: thirdSubCatId.trim(),
-                brand: brand || null,
-                priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
-                rating: rating || null,
-                inStock: inStock !== undefined ? inStock : null,
-                discount: discount || null,
-                productRam: productRam || null,
-                size: size || null,
-                productWeight: productWeight || null
-            },
-            availableFilters: {
-                brands: availableBrands.sort(),
-                priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
-                ramOptions: availableRam.flat().filter(Boolean).sort(),
-                sizeOptions: availableSizes.flat().filter(Boolean).sort()
-            }
-        });
-
-    } catch (error) {
-        console.error('Get Products By ThirdSubCatId Error:', error);
-
-        return res.status(500).json({
-            message: error.message || 'Failed to retrieve products',
-            error: true,
-            success: false
-        });
-    }
-}
-
-/**
- * @desc    Get all products by catName (with advanced filtering)
- * @route   GET /api/products/catName/:catName
- * @access  Public
- */
-export async function getProductsByCatName(req, res) {
   try {
-      const { catName } = req.params;
-      const {
-          page = 1,
-          limit = 10,
-          sort = '-createdAt',
-          minPrice,
-          maxPrice,
-          brand,
-          rating,
-          inStock,
-          discount,
-          productRam,
-          size,
-          productWeight,
-          location
-      } = req.query;
+      const { categoryId } = req.params;
 
-      // ================ VALIDATE PARAMETERS ================
-      
-      if (!catName || !catName.trim()) {
+      // Validate category ID
+      if (!mongoose.Types.ObjectId.isValid(categoryId)) {
           return res.status(400).json({
-              message: 'Category name is required',
+              message: 'Invalid category ID format',
               error: true,
               success: false
           });
       }
 
-      const pageNum = parseInt(page);
-      const limitNum = parseInt(limit);
+      // Validate pagination
+      const { pageNum, limitNum, errors } = validatePaginationParams(
+          req.query.page,
+          req.query.limit
+      );
 
-      if (isNaN(pageNum) || pageNum < 1) {
+      if (errors.length > 0) {
           return res.status(400).json({
-              message: 'Invalid page number. Must be a positive integer',
+              message: errors.join(', '),
               error: true,
               success: false
           });
       }
 
-      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
-          return res.status(400).json({
-              message: 'Invalid limit. Must be between 1 and 100',
-              error: true,
-              success: false
-          });
-      }
+      // Build filter and sort
+      const baseFilter = { category: categoryId };
+      const filter = await buildProductFilter(baseFilter, req.query);
+      const sortObj = buildSortObject(req.query.sort);
 
-      // ================ BUILD FILTER OBJECT ================
-      
-      // Decode URL-encoded catName (e.g., "Smart%20Phones" -> "Smart Phones")
-      const decodedCatName = decodeURIComponent(catName.trim());
-      
-      // Case-insensitive regex match for catName
-      const filter = { 
-          catName: { $regex: `^${decodedCatName}$`, $options: 'i' } 
-      };
+      // Fetch products
+      const { totalProducts, products } = await fetchProducts(
+          filter,
+          sortObj,
+          pageNum,
+          limitNum
+      );
 
-      // Price range filter
-      if (minPrice || maxPrice) {
-          filter.price = {};
-          if (minPrice) {
-              const minPriceNum = parseFloat(minPrice);
-              if (!isNaN(minPriceNum) && minPriceNum >= 0) {
-                  filter.price.$gte = minPriceNum;
-              }
-          }
-          if (maxPrice) {
-              const maxPriceNum = parseFloat(maxPrice);
-              if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
-                  filter.price.$lte = maxPriceNum;
-              }
-          }
-      }
+      const pagination = buildPaginationMetadata(pageNum, limitNum, totalProducts);
 
-      // Brand filter
-      if (brand) {
-          filter.brand = { $regex: brand.trim(), $options: 'i' };
-      }
-
-      // Rating filter
-      if (rating) {
-          const ratingNum = parseFloat(rating);
-          if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
-              filter.rating = { $gte: ratingNum };
-          }
-      }
-
-      // In stock filter
-      if (inStock !== undefined) {
-          if (inStock === 'true' || inStock === true) {
-              filter.countInStock = { $gt: 0 };
-          } else if (inStock === 'false' || inStock === false) {
-              filter.countInStock = 0;
-          }
-      }
-
-      // Discount filter
-      if (discount) {
-          const discountNum = parseFloat(discount);
-          if (!isNaN(discountNum) && discountNum >= 0) {
-              filter.discount = { $gte: discountNum };
-          }
-      }
-
-      // Product RAM filter (multiple values)
-      if (productRam) {
-          filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
-      }
-
-      // Size filter (multiple values)
-      if (size) {
-          filter.size = { $in: size.split(',').map(s => s.trim()) };
-      }
-
-      // Product weight filter (multiple values)
-      if (productWeight) {
-          filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
-      }
-
-      // Location filter
-      if (location) {
-          filter['location.value'] = { $regex: location.trim(), $options: 'i' };
-      }
-
-      // ================ BUILD SORT OBJECT ================
-      
-      let sortObj = {};
-      
-      if (sort) {
-          const sortFields = sort.split(',');
-          sortFields.forEach(field => {
-              if (field.startsWith('-')) {
-                  sortObj[field.substring(1)] = -1; // Descending
-              } else {
-                  sortObj[field] = 1; // Ascending
-              }
-          });
-      } else {
-          sortObj = { createdAt: -1 }; // Default: newest first
-      }
-
-      // ================ EXECUTE QUERY ================
-      
-      const skip = (pageNum - 1) * limitNum;
-
-      // Get total count
-      const totalProducts = await ProductModel.countDocuments(filter);
-      const totalPages = Math.ceil(totalProducts / limitNum);
-
-      // Return empty result if no products found
-      if (totalProducts === 0 && pageNum === 1) {
-          return res.status(200).json({
-              message: `No products found for category: ${decodedCatName}`,
-              error: false,
-              success: true,
-              data: [],
-              pagination: {
-                  currentPage: pageNum,
-                  totalPages: 0,
-                  totalProducts: 0,
-                  limit: limitNum,
-                  hasNextPage: false,
-                  hasPrevPage: false,
-                  nextPage: null,
-                  prevPage: null
-              },
-              appliedFilters: {
-                  catName: decodedCatName
-              },
-              availableFilters: {
-                  brands: [],
-                  priceRange: { minPrice: 0, maxPrice: 0 },
-                  ramOptions: [],
-                  sizeOptions: []
-              }
-          });
-      }
-
-      // Get products with pagination
-      const products = await ProductModel
-          .find(filter)
-          .sort(sortObj)
-          .skip(skip)
-          .limit(limitNum)
-          .populate('category', 'name slug color')
-          .select('-__v')
-          .lean();
-
-      // ================ GET FILTER AGGREGATIONS ================
-      
-      // Get available brands for this catName
-      const availableBrands = await ProductModel.distinct('brand', { 
-          catName: { $regex: `^${decodedCatName}$`, $options: 'i' },
-          brand: { $ne: '' } 
-      });
-      
-      // Get price range
-      const priceRange = await ProductModel.aggregate([
-          { $match: { catName: { $regex: `^${decodedCatName}$`, $options: 'i' } } },
-          {
-              $group: {
-                  _id: null,
-                  minPrice: { $min: '$price' },
-                  maxPrice: { $max: '$price' }
-              }
-          }
-      ]);
-
-      // Get available RAM options
-      const availableRam = await ProductModel.distinct('productRam', { 
-          catName: { $regex: `^${decodedCatName}$`, $options: 'i' } 
-      });
-      
-      // Get available sizes
-      const availableSizes = await ProductModel.distinct('size', { 
-          catName: { $regex: `^${decodedCatName}$`, $options: 'i' } 
-      });
-
-      // Get available locations
-      const availableLocations = await ProductModel.aggregate([
-          { $match: { catName: { $regex: `^${decodedCatName}$`, $options: 'i' } } },
-          { $unwind: '$location' },
-          { $group: { _id: '$location.value' } },
-          { $sort: { _id: 1 } }
-      ]);
-
-      // Get subcategories (subCat) under this catName
-      const availableSubCats = await ProductModel.distinct('subCat', { 
-          catName: { $regex: `^${decodedCatName}$`, $options: 'i' },
-          subCat: { $ne: '' }
-      });
-
-      // ================ PREPARE RESPONSE ================
-      
       return res.status(200).json({
           message: 'Products retrieved successfully',
           error: false,
           success: true,
           data: products,
-          pagination: {
-              currentPage: pageNum,
-              totalPages,
-              totalProducts,
-              limit: limitNum,
-              hasNextPage: pageNum < totalPages,
-              hasPrevPage: pageNum > 1,
-              nextPage: pageNum < totalPages ? pageNum + 1 : null,
-              prevPage: pageNum > 1 ? pageNum - 1 : null
-          },
-          appliedFilters: {
-              catName: decodedCatName,
-              brand: brand || null,
-              priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
-              rating: rating || null,
-              inStock: inStock !== undefined ? inStock : null,
-              discount: discount || null,
-              productRam: productRam || null,
-              size: size || null,
-              productWeight: productWeight || null,
-              location: location || null
-          },
-          availableFilters: {
-              brands: availableBrands.sort(),
-              priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
-              ramOptions: availableRam.flat().filter(Boolean).sort(),
-              sizeOptions: availableSizes.flat().filter(Boolean).sort(),
-              locations: availableLocations.map(loc => loc._id).filter(Boolean),
-              subCategories: availableSubCats.sort()
-          }
+          pagination
       });
 
   } catch (error) {
-      console.error('Get Products By CatName Error:', error);
+      console.error('Get Products By Category Error:', error);
 
       return res.status(500).json({
           message: error.message || 'Failed to retrieve products',
@@ -1844,183 +704,127 @@ export async function getProductsByCatName(req, res) {
 }
 
 /**
+ * @desc    Get all products by catId
+ * @route   GET /api/products/catId/:catId
+ * @access  Public
+ */
+export async function getProductsByCatId(req, res) {
+  const { catId } = req.params;
+
+  // Validate catId
+  if (!catId?.trim()) {
+      return res.status(400).json({
+          message: 'Category ID is required',
+          error: true,
+          success: false
+      });
+  }
+
+  const result = await getProductsByField('catId', catId.trim(), req.query);
+  return res.status(result.statusCode).json(result.data);
+}
+
+/**
+ * @desc    Get all products by subCatId
+ * @route   GET /api/products/subCatId/:subCatId
+ * @access  Public
+ */
+export async function getProductsBySubCatId(req, res) {
+  const { subCatId } = req.params;
+
+  // Validate subCatId
+  if (!subCatId?.trim()) {
+      return res.status(400).json({
+          message: 'Sub-category ID is required',
+          error: true,
+          success: false
+      });
+  }
+
+  const result = await getProductsByField('subCatId', subCatId.trim(), req.query);
+  return res.status(result.statusCode).json(result.data);
+}
+
+/**
+ * @desc    Get all products by thirdSubCatId
+ * @route   GET /api/products/thirdSubCatId/:thirdSubCatId
+ * @access  Public
+ */
+export async function getProductsByThirdSubCatId(req, res) {
+  const { thirdSubCatId } = req.params;
+
+  if (!thirdSubCatId?.trim()) {
+      return res.status(400).json({
+          message: 'Third sub-category ID is required',
+          error: true,
+          success: false
+      });
+  }
+
+  const result = await getProductsByField('thirdSubCatId', thirdSubCatId.trim(), req.query);
+  return res.status(result.statusCode).json(result.data);
+}
+
+/**
+ * @desc    Get all products by catName
+ * @route   GET /api/products/catName/:catName
+ * @access  Public
+ */
+export async function getProductsByCatName(req, res) {
+  const { catName } = req.params;
+
+  if (!catName?.trim()) {
+      return res.status(400).json({
+          message: 'Category name is required',
+          error: true,
+          success: false
+      });
+  }
+
+  const decodedCatName = decodeURIComponent(catName.trim());
+  const result = await getProductsByField('catName', decodedCatName, req.query, { 
+      useRegex: true 
+  });
+  return res.status(result.statusCode).json(result.data);
+}
+
+/**
  * @desc    Get all products by subCat (subcategory name)
  * @route   GET /api/products/subCat/:subCat
  * @access  Public
  */
 export async function getProductsBySubCat(req, res) {
   try {
-      const { subCat } = req.params;
-      const {
-          page = 1,
-          limit = 10,
-          sort = '-createdAt',
-          minPrice,
-          maxPrice,
-          brand,
-          rating,
-          inStock,
-          discount,
-          productRam,
-          size,
-          productWeight
-      } = req.query;
+    const { subCat } = req.params;
 
-      // ================ VALIDATE PARAMETERS ================
-      
-      if (!subCat || !subCat.trim()) {
-          return res.status(400).json({
-              message: 'Sub-category name is required',
-              error: true,
-              success: false
-          });
-      }
+    // Validate parameters
+    if (!subCat?.trim()) {
+            return res.status(400).json({
+                message: 'Sub-category name is required',
+                error: true,
+                success: false
+            });
+        }
 
-      const pageNum = parseInt(page);
-      const limitNum = parseInt(limit);
+    const decodedSubCat = decodeURIComponent(subCat.trim());
 
-      if (isNaN(pageNum) || pageNum < 1) {
-          return res.status(400).json({
-              message: 'Invalid page number. Must be a positive integer',
-              error: true,
-              success: false
-          });
-      }
+    // Use generic handler với exact match
+    const result = await getProductsByField('subCat', decodedSubCat, req.query, { 
+        useRegex: true,
+        exactMatch: true
+    });
 
-      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
-          return res.status(400).json({
-              message: 'Invalid limit. Must be between 1 and 100',
-              error: true,
-              success: false
-          });
-      }
+    // Nếu thành công, thêm thirdSubCategories vào available filters
+    if (result.success) {
+        const baseFilter = { 
+            subCat: { $regex: `^${decodedSubCat}$`, $options: 'i' } 
+        };
+        const thirdSubCategories = await getThirdSubCategories(baseFilter);
+        
+        result.data.availableFilters.thirdSubCategories = thirdSubCategories.sort();
+    }
 
-      // ================ BUILD FILTER OBJECT ================
-      
-      const decodedSubCat = decodeURIComponent(subCat.trim());
-      const filter = { 
-          subCat: { $regex: `^${decodedSubCat}$`, $options: 'i' } 
-      };
-
-      // Apply other filters
-      if (minPrice || maxPrice) {
-          filter.price = {};
-          if (minPrice) filter.price.$gte = parseFloat(minPrice);
-          if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
-      }
-
-      if (brand) filter.brand = { $regex: brand.trim(), $options: 'i' };
-      if (rating) filter.rating = { $gte: parseFloat(rating) };
-      
-      if (inStock !== undefined) {
-          filter.countInStock = inStock === 'true' ? { $gt: 0 } : 0;
-      }
-
-      if (discount) filter.discount = { $gte: parseFloat(discount) };
-      if (productRam) filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
-      if (size) filter.size = { $in: size.split(',').map(s => s.trim()) };
-      if (productWeight) filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
-
-      // ================ BUILD SORT OBJECT ================
-      
-      let sortObj = {};
-      if (sort) {
-          const sortFields = sort.split(',');
-          sortFields.forEach(field => {
-              sortObj[field.startsWith('-') ? field.substring(1) : field] = field.startsWith('-') ? -1 : 1;
-          });
-      } else {
-          sortObj = { createdAt: -1 };
-      }
-
-      // ================ EXECUTE QUERY ================
-      
-      const skip = (pageNum - 1) * limitNum;
-      const totalProducts = await ProductModel.countDocuments(filter);
-      const totalPages = Math.ceil(totalProducts / limitNum);
-
-      if (totalProducts === 0) {
-          return res.status(200).json({
-              message: `No products found for sub-category: ${decodedSubCat}`,
-              error: false,
-              success: true,
-              data: [],
-              pagination: {
-                  currentPage: pageNum,
-                  totalPages: 0,
-                  totalProducts: 0,
-                  limit: limitNum,
-                  hasNextPage: false,
-                  hasPrevPage: false
-              }
-          });
-      }
-
-      const products = await ProductModel
-          .find(filter)
-          .sort(sortObj)
-          .skip(skip)
-          .limit(limitNum)
-          .populate('category', 'name slug color')
-          .select('-__v')
-          .lean();
-
-      // ================ GET FILTER AGGREGATIONS ================
-      
-      const subCatRegex = { $regex: `^${decodedSubCat}$`, $options: 'i' };
-      
-      const availableBrands = await ProductModel.distinct('brand', { 
-          subCat: subCatRegex, 
-          brand: { $ne: '' } 
-      });
-      
-      const priceRange = await ProductModel.aggregate([
-          { $match: { subCat: subCatRegex } },
-          { $group: { _id: null, minPrice: { $min: '$price' }, maxPrice: { $max: '$price' } } }
-      ]);
-
-      const availableRam = await ProductModel.distinct('productRam', { subCat: subCatRegex });
-      const availableSizes = await ProductModel.distinct('size', { subCat: subCatRegex });
-      
-      // Get third subcategories under this subCat
-      const availableThirdSubCats = await ProductModel.distinct('thirdSubCat', { 
-          subCat: subCatRegex,
-          thirdSubCat: { $ne: '' }
-      });
-
-      // ================ PREPARE RESPONSE ================
-      
-      return res.status(200).json({
-          message: 'Products retrieved successfully',
-          error: false,
-          success: true,
-          data: products,
-          pagination: {
-              currentPage: pageNum,
-              totalPages,
-              totalProducts,
-              limit: limitNum,
-              hasNextPage: pageNum < totalPages,
-              hasPrevPage: pageNum > 1,
-              nextPage: pageNum < totalPages ? pageNum + 1 : null,
-              prevPage: pageNum > 1 ? pageNum - 1 : null
-          },
-          appliedFilters: {
-              subCat: decodedSubCat,
-              brand: brand || null,
-              priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
-              rating: rating || null,
-              inStock: inStock !== undefined ? inStock : null,
-              discount: discount || null
-          },
-          availableFilters: {
-              brands: availableBrands.sort(),
-              priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
-              ramOptions: availableRam.flat().filter(Boolean).sort(),
-              sizeOptions: availableSizes.flat().filter(Boolean).sort(),
-              thirdSubCategories: availableThirdSubCats.sort()
-          }
-      });
+    return res.status(result.statusCode).json(result.data);
 
   } catch (error) {
       console.error('Get Products By SubCat Error:', error);
@@ -2039,146 +843,21 @@ export async function getProductsBySubCat(req, res) {
  * @access  Public
  */
 export async function getProductsByThirdSubCat(req, res) {
-  try {
-      const { thirdSubCat } = req.params;
-      const {
-          page = 1,
-          limit = 10,
-          sort = '-createdAt',
-          minPrice,
-          maxPrice,
-          brand,
-          rating,
-          inStock,
-          discount,
-          productRam,
-          size,
-          productWeight
-      } = req.query;
+  const { thirdSubCat } = req.params;
 
-      // Validate parameters
-      if (!thirdSubCat || !thirdSubCat.trim()) {
-          return res.status(400).json({
-              message: 'Third sub-category name is required',
-              error: true,
-              success: false
-          });
-      }
-
-      const pageNum = parseInt(page);
-      const limitNum = parseInt(limit);
-
-      if (isNaN(pageNum) || pageNum < 1) {
-          return res.status(400).json({
-              message: 'Invalid page number. Must be a positive integer',
-              error: true,
-              success: false
-          });
-      }
-
-      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
-          return res.status(400).json({
-              message: 'Invalid limit. Must be between 1 and 100',
-              error: true,
-              success: false
-          });
-      }
-
-      // Build filter
-      const decodedThirdSubCat = decodeURIComponent(thirdSubCat.trim());
-      const filter = { 
-          thirdSubCat: { $regex: `^${decodedThirdSubCat}$`, $options: 'i' } 
-      };
-
-      if (minPrice || maxPrice) {
-          filter.price = {};
-          if (minPrice) filter.price.$gte = parseFloat(minPrice);
-          if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
-      }
-
-      if (brand) filter.brand = { $regex: brand.trim(), $options: 'i' };
-      if (rating) filter.rating = { $gte: parseFloat(rating) };
-      if (inStock === 'true') filter.countInStock = { $gt: 0 };
-      if (discount) filter.discount = { $gte: parseFloat(discount) };
-      if (productRam) filter.productRam = { $in: productRam.split(',').map(r => r.trim()) };
-      if (size) filter.size = { $in: size.split(',').map(s => s.trim()) };
-      if (productWeight) filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
-
-      // Build sort
-      let sortObj = {};
-      if (sort) {
-          sort.split(',').forEach(field => {
-              sortObj[field.startsWith('-') ? field.substring(1) : field] = field.startsWith('-') ? -1 : 1;
-          });
-      } else {
-          sortObj = { createdAt: -1 };
-      }
-
-      // Execute query
-      const skip = (pageNum - 1) * limitNum;
-      const totalProducts = await ProductModel.countDocuments(filter);
-      const totalPages = Math.ceil(totalProducts / limitNum);
-
-      const products = await ProductModel
-          .find(filter)
-          .sort(sortObj)
-          .skip(skip)
-          .limit(limitNum)
-          .populate('category', 'name slug color')
-          .select('-__v')
-          .lean();
-
-      // Get aggregations
-      const thirdSubCatRegex = { $regex: `^${decodedThirdSubCat}$`, $options: 'i' };
-      
-      const [availableBrands, priceRange, availableRam, availableSizes] = await Promise.all([
-          ProductModel.distinct('brand', { thirdSubCat: thirdSubCatRegex, brand: { $ne: '' } }),
-          ProductModel.aggregate([
-              { $match: { thirdSubCat: thirdSubCatRegex } },
-              { $group: { _id: null, minPrice: { $min: '$price' }, maxPrice: { $max: '$price' } } }
-          ]),
-          ProductModel.distinct('productRam', { thirdSubCat: thirdSubCatRegex }),
-          ProductModel.distinct('size', { thirdSubCat: thirdSubCatRegex })
-      ]);
-
-      return res.status(200).json({
-          message: 'Products retrieved successfully',
-          error: false,
-          success: true,
-          data: products,
-          pagination: {
-              currentPage: pageNum,
-              totalPages,
-              totalProducts,
-              limit: limitNum,
-              hasNextPage: pageNum < totalPages,
-              hasPrevPage: pageNum > 1,
-              nextPage: pageNum < totalPages ? pageNum + 1 : null,
-              prevPage: pageNum > 1 ? pageNum - 1 : null
-          },
-          appliedFilters: {
-              thirdSubCat: decodedThirdSubCat,
-              brand: brand || null,
-              priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
-              rating: rating || null,
-              inStock: inStock || null,
-              discount: discount || null
-          },
-          availableFilters: {
-              brands: availableBrands.sort(),
-              priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
-              ramOptions: availableRam.flat().filter(Boolean).sort(),
-              sizeOptions: availableSizes.flat().filter(Boolean).sort()
-          }
-      });
-
-  } catch (error) {
-      console.error('Get Products By ThirdSubCat Error:', error);
-
-      return res.status(500).json({
-          message: error.message || 'Failed to retrieve products',
+  // Validate parameters
+  if (!thirdSubCat?.trim()) {
+      return res.status(400).json({
+          message: 'Third sub-category name is required',
           error: true,
           success: false
       });
   }
+
+  const decodedThirdSubCat = decodeURIComponent(thirdSubCat.trim());
+  const result = await getProductsByField('thirdSubCat', decodedThirdSubCat, req.query, { 
+      useRegex: true,
+      exactMatch: true
+  });
+  return res.status(result.statusCode).json(result.data);
 }
