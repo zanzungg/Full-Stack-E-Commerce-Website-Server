@@ -11,6 +11,7 @@ import connectDB from './config/connectDB.js';
 import userRouter from './routes/user.route.js';
 import categoryRouter from './routes/category.route.js';
 import productRouter from './routes/product.route.js';
+import cartRouter from './routes/cart.route.js';
 
 const app = express();
 
@@ -35,6 +36,7 @@ app.get('/', (req, res) => {
 app.use('/api/users', userRouter);
 app.use('/api/categories', categoryRouter);
 app.use('/api/products', productRouter);
+app.use('/api/cart', cartRouter);
 
 connectDB().then(() => {
     app.listen(process.env.PORT, () => {
