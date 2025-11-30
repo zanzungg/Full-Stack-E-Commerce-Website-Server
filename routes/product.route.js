@@ -5,6 +5,9 @@ import {
   getFeaturedProducts, 
   getProductById, 
   getProductsByCategory, 
+  getProductsByCatId, 
+  getProductsBySubCatId, 
+  getProductsByThirdSubCatId, 
   uploadImages 
 } from "../controllers/product.controller.js";
 import auth from "../middlewares/auth.js";
@@ -27,6 +30,16 @@ productRouter.get("/featured", getFeaturedProducts);
 
 // Get products by category
 productRouter.get("/category/:categoryId", getProductsByCategory);
+
+// Get products by catId
+productRouter.get("/catId/:catId", getProductsByCatId);
+
+// Get products by subCatId
+productRouter.get("/subCatId/:subCatId", getProductsBySubCatId);
+
+// Get products by thirdSubCatId
+productRouter.get("/thirdSubCatId/:thirdSubCatId", getProductsByThirdSubCatId);
+
 
 // Get single product by ID
 productRouter.get("/:id", getProductById);

@@ -444,232 +444,232 @@ export async function uploadImages(req, res) {
  * @access  Public
  */
 export async function getAllProducts(req, res) {
-  try {
-      // ================ EXTRACT QUERY PARAMETERS ================
-      const {
-          page = 1,
-          limit = 10,
-          sort = '-createdAt',
-          search = '',
-          category,
-          catId,
-          subCatId,
-          thirdSubCatId,
-          brand,
-          minPrice,
-          maxPrice,
-          isFeatured,
-          inStock,
-          rating,
-          location,
-          discount,
-          productRam,
-          size,
-          productWeight
-      } = req.query;
+    try {
+        // ================ EXTRACT QUERY PARAMETERS ================
+        const {
+            page = 1,
+            limit = 10,
+            sort = '-createdAt',
+            search = '',
+            category,
+            catId,
+            subCatId,
+            thirdSubCatId,
+            brand,
+            minPrice,
+            maxPrice,
+            isFeatured,
+            inStock,
+            rating,
+            location,
+            discount,
+            productRam,
+            size,
+            productWeight
+        } = req.query;
 
-      // ================ VALIDATE QUERY PARAMETERS ================
-      
-      const pageNum = parseInt(page);
-      const limitNum = parseInt(limit);
+        // ================ VALIDATE QUERY PARAMETERS ================
+        
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
 
-      if (isNaN(pageNum) || pageNum < 1) {
-          return res.status(400).json({
-              message: 'Invalid page number. Must be a positive integer',
-              error: true,
-              success: false
-          });
-      }
+        if (isNaN(pageNum) || pageNum < 1) {
+            return res.status(400).json({
+                message: 'Invalid page number. Must be a positive integer',
+                error: true,
+                success: false
+            });
+        }
 
-      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
-          return res.status(400).json({
-              message: 'Invalid limit. Must be between 1 and 100',
-              error: true,
-              success: false
-          });
-      }
+        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+            return res.status(400).json({
+                message: 'Invalid limit. Must be between 1 and 100',
+                error: true,
+                success: false
+            });
+        }
 
-      // ================ BUILD FILTER OBJECT ================
-      
-      const filter = {};
+        // ================ BUILD FILTER OBJECT ================
+        
+        const filter = {};
 
-      // Text search (name and description)
-      if (search && search.trim()) {
-          filter.$or = [
-              { name: { $regex: search.trim(), $options: 'i' } },
-              { description: { $regex: search.trim(), $options: 'i' } },
-              { brand: { $regex: search.trim(), $options: 'i' } }
-          ];
-      }
+        // Text search (name and description)
+        if (search && search.trim()) {
+            filter.$or = [
+                { name: { $regex: search.trim(), $options: 'i' } },
+                { description: { $regex: search.trim(), $options: 'i' } },
+                { brand: { $regex: search.trim(), $options: 'i' } }
+            ];
+        }
 
-      // Category filters
-      if (category) {
-          if (mongoose.Types.ObjectId.isValid(category)) {
-              filter.category = category;
-          }
-      }
+        // Category filters
+        if (category) {
+            if (mongoose.Types.ObjectId.isValid(category)) {
+                filter.category = category;
+            }
+        }
 
-      if (catId) {
-          filter.catId = catId;
-      }
+        if (catId) {
+            filter.catId = catId;
+        }
 
-      if (subCatId) {
-          filter.subCatId = subCatId;
-      }
+        if (subCatId) {
+            filter.subCatId = subCatId;
+        }
 
-      if (thirdSubCatId) {
-          filter.thirdSubCatId = thirdSubCatId;
-      }
+        if (thirdSubCatId) {
+            filter.thirdSubCatId = thirdSubCatId;
+        }
 
-      // Brand filter
-      if (brand) {
-          filter.brand = { $regex: brand.trim(), $options: 'i' };
-      }
+        // Brand filter
+        if (brand) {
+            filter.brand = { $regex: brand.trim(), $options: 'i' };
+        }
 
-      // Price range filter
-      if (minPrice || maxPrice) {
-          filter.price = {};
-          if (minPrice) {
-              const minPriceNum = parseFloat(minPrice);
-              if (!isNaN(minPriceNum) && minPriceNum >= 0) {
-                  filter.price.$gte = minPriceNum;
-              }
-          }
-          if (maxPrice) {
-              const maxPriceNum = parseFloat(maxPrice);
-              if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
-                  filter.price.$lte = maxPriceNum;
-              }
-          }
-      }
+        // Price range filter
+        if (minPrice || maxPrice) {
+            filter.price = {};
+            if (minPrice) {
+                const minPriceNum = parseFloat(minPrice);
+                if (!isNaN(minPriceNum) && minPriceNum >= 0) {
+                    filter.price.$gte = minPriceNum;
+                }
+            }
+            if (maxPrice) {
+                const maxPriceNum = parseFloat(maxPrice);
+                if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
+                    filter.price.$lte = maxPriceNum;
+                }
+            }
+        }
 
-      // Featured products filter
-      if (isFeatured !== undefined) {
-          filter.isFeatured = isFeatured === 'true' || isFeatured === true;
-      }
+        // Featured products filter
+        if (isFeatured !== undefined) {
+            filter.isFeatured = isFeatured === 'true' || isFeatured === true;
+        }
 
-      // In stock filter
-      if (inStock !== undefined) {
-          if (inStock === 'true' || inStock === true) {
-              filter.countInStock = { $gt: 0 };
-          } else {
-              filter.countInStock = 0;
-          }
-      }
+        // In stock filter
+        if (inStock !== undefined) {
+            if (inStock === 'true' || inStock === true) {
+                filter.countInStock = { $gt: 0 };
+            } else {
+                filter.countInStock = 0;
+            }
+        }
 
-      // Rating filter
-      if (rating) {
-          const ratingNum = parseFloat(rating);
-          if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
-              filter.rating = { $gte: ratingNum };
-          }
-      }
+        // Rating filter
+        if (rating) {
+            const ratingNum = parseFloat(rating);
+            if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
+                filter.rating = { $gte: ratingNum };
+            }
+        }
 
-      // Location filter
-      if (location) {
-          filter['location.value'] = { $regex: location.trim(), $options: 'i' };
-      }
+        // Location filter
+        if (location) {
+            filter['location.value'] = { $regex: location.trim(), $options: 'i' };
+        }
 
-      // Discount filter
-      if (discount) {
-          const discountNum = parseFloat(discount);
-          if (!isNaN(discountNum) && discountNum >= 0) {
-              filter.discount = { $gte: discountNum };
-          }
-      }
+        // Discount filter
+        if (discount) {
+            const discountNum = parseFloat(discount);
+            if (!isNaN(discountNum) && discountNum >= 0) {
+                filter.discount = { $gte: discountNum };
+            }
+        }
 
-      // Product RAM filter
-      if (productRam) {
-          filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
-      }
+        // Product RAM filter
+        if (productRam) {
+            filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
+        }
 
-      // Size filter
-      if (size) {
-          filter.size = { $in: size.split(',').map(s => s.trim()) };
-      }
+        // Size filter
+        if (size) {
+            filter.size = { $in: size.split(',').map(s => s.trim()) };
+        }
 
-      // Product weight filter
-      if (productWeight) {
-          filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
-      }
+        // Product weight filter
+        if (productWeight) {
+            filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
+        }
 
-      // ================ BUILD SORT OBJECT ================
-      
-      let sortObj = {};
-      
-      // Parse sort parameter (format: field or -field for descending)
-      if (sort) {
-          const sortFields = sort.split(',');
-          sortFields.forEach(field => {
-              if (field.startsWith('-')) {
-                  sortObj[field.substring(1)] = -1; // Descending
-              } else {
-                  sortObj[field] = 1; // Ascending
-              }
-          });
-      } else {
-          sortObj = { createdAt: -1 }; // Default sort by newest
-      }
+        // ================ BUILD SORT OBJECT ================
+        
+        let sortObj = {};
+        
+        // Parse sort parameter (format: field or -field for descending)
+        if (sort) {
+            const sortFields = sort.split(',');
+            sortFields.forEach(field => {
+                if (field.startsWith('-')) {
+                    sortObj[field.substring(1)] = -1; // Descending
+                } else {
+                    sortObj[field] = 1; // Ascending
+                }
+            });
+        } else {
+            sortObj = { createdAt: -1 }; // Default sort by newest
+        }
 
-      // ================ EXECUTE QUERY ================
-      
-      const skip = (pageNum - 1) * limitNum;
+        // ================ EXECUTE QUERY ================
+        
+        const skip = (pageNum - 1) * limitNum;
 
-      // Get total count for pagination
-      const totalProducts = await ProductModel.countDocuments(filter);
-      const totalPages = Math.ceil(totalProducts / limitNum);
+        // Get total count for pagination
+        const totalProducts = await ProductModel.countDocuments(filter);
+        const totalPages = Math.ceil(totalProducts / limitNum);
 
-      // Get products with pagination
-      const products = await ProductModel
-          .find(filter)
-          .sort(sortObj)
-          .skip(skip)
-          .limit(limitNum)
-          .populate('category', 'name slug color') // Populate category details
-          .select('-__v') // Exclude version key
-          .lean(); // Convert to plain JavaScript objects for better performance
+        // Get products with pagination
+        const products = await ProductModel
+            .find(filter)
+            .sort(sortObj)
+            .skip(skip)
+            .limit(limitNum)
+            .populate('category', 'name slug color') // Populate category details
+            .select('-__v') // Exclude version key
+            .lean(); // Convert to plain JavaScript objects for better performance
 
-      // ================ PREPARE RESPONSE ================
-      
-      return res.status(200).json({
-          message: 'Products retrieved successfully',
-          error: false,
-          success: true,
-          data: products,
-          pagination: {
-              currentPage: pageNum,
-              totalPages,
-              totalProducts,
-              limit: limitNum,
-              hasNextPage: pageNum < totalPages,
-              hasPrevPage: pageNum > 1,
-              nextPage: pageNum < totalPages ? pageNum + 1 : null,
-              prevPage: pageNum > 1 ? pageNum - 1 : null
-          },
-          filters: {
-              search: search || null,
-              category: category || null,
-              catId: catId || null,
-              subCatId: subCatId || null,
-              thirdSubCatId: thirdSubCatId || null,
-              brand: brand || null,
-              priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
-              isFeatured: isFeatured !== undefined ? isFeatured : null,
-              inStock: inStock !== undefined ? inStock : null,
-              rating: rating || null,
-              discount: discount || null
-          }
-      });
+        // ================ PREPARE RESPONSE ================
+        
+        return res.status(200).json({
+            message: 'Products retrieved successfully',
+            error: false,
+            success: true,
+            data: products,
+            pagination: {
+                currentPage: pageNum,
+                totalPages,
+                totalProducts,
+                limit: limitNum,
+                hasNextPage: pageNum < totalPages,
+                hasPrevPage: pageNum > 1,
+                nextPage: pageNum < totalPages ? pageNum + 1 : null,
+                prevPage: pageNum > 1 ? pageNum - 1 : null
+            },
+            filters: {
+                search: search || null,
+                category: category || null,
+                catId: catId || null,
+                subCatId: subCatId || null,
+                thirdSubCatId: thirdSubCatId || null,
+                brand: brand || null,
+                priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
+                isFeatured: isFeatured !== undefined ? isFeatured : null,
+                inStock: inStock !== undefined ? inStock : null,
+                rating: rating || null,
+                discount: discount || null
+            }
+        });
 
-  } catch (error) {
-      console.error('Get All Products Error:', error);
+    } catch (error) {
+        console.error('Get All Products Error:', error);
 
-      return res.status(500).json({
-          message: error.message || 'Failed to retrieve products',
-          error: true,
-          success: false
-      });
-  }
+        return res.status(500).json({
+            message: error.message || 'Failed to retrieve products',
+            error: true,
+            success: false
+        });
+    }
 }
 
 /**
@@ -678,48 +678,48 @@ export async function getAllProducts(req, res) {
  * @access  Public
  */
 export async function getProductById(req, res) {
-  try {
-      const { id } = req.params;
+    try {
+        const { id } = req.params;
 
-      // Validate product ID
-      if (!mongoose.Types.ObjectId.isValid(id)) {
-          return res.status(400).json({
-              message: 'Invalid product ID format',
-              error: true,
-              success: false
-          });
-      }
+        // Validate product ID
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                message: 'Invalid product ID format',
+                error: true,
+                success: false
+            });
+        }
 
-      // Find product
-      const product = await ProductModel
-          .findById(id)
-          .populate('category', 'name slug color')
-          .lean();
+        // Find product
+        const product = await ProductModel
+            .findById(id)
+            .populate('category', 'name slug color')
+            .lean();
 
-      if (!product) {
-          return res.status(404).json({
-              message: 'Product not found',
-              error: true,
-              success: false
-          });
-      }
+        if (!product) {
+            return res.status(404).json({
+                message: 'Product not found',
+                error: true,
+                success: false
+            });
+        }
 
-      return res.status(200).json({
-          message: 'Product retrieved successfully',
-          error: false,
-          success: true,
-          data: product
-      });
+        return res.status(200).json({
+            message: 'Product retrieved successfully',
+            error: false,
+            success: true,
+            data: product
+        });
 
-  } catch (error) {
-      console.error('Get Product By ID Error:', error);
+    } catch (error) {
+        console.error('Get Product By ID Error:', error);
 
-      return res.status(500).json({
-          message: error.message || 'Failed to retrieve product',
-          error: true,
-          success: false
-      });
-  }
+        return res.status(500).json({
+            message: error.message || 'Failed to retrieve product',
+            error: true,
+            success: false
+        });
+    }
 }
 
 /**
@@ -728,43 +728,43 @@ export async function getProductById(req, res) {
  * @access  Public
  */
 export async function getFeaturedProducts(req, res) {
-  try {
-      const { limit = 10 } = req.query;
-      const limitNum = parseInt(limit);
+    try {
+        const { limit = 10 } = req.query;
+        const limitNum = parseInt(limit);
 
-      if (isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
-          return res.status(400).json({
-              message: 'Invalid limit. Must be between 1 and 50',
-              error: true,
-              success: false
-          });
-      }
+        if (isNaN(limitNum) || limitNum < 1 || limitNum > 50) {
+            return res.status(400).json({
+                message: 'Invalid limit. Must be between 1 and 50',
+                error: true,
+                success: false
+            });
+        }
 
-      const products = await ProductModel
-          .find({ isFeatured: true })
-          .sort({ createdAt: -1 })
-          .limit(limitNum)
-          .populate('category', 'name slug color')
-          .select('-__v')
-          .lean();
+        const products = await ProductModel
+            .find({ isFeatured: true })
+            .sort({ createdAt: -1 })
+            .limit(limitNum)
+            .populate('category', 'name slug color')
+            .select('-__v')
+            .lean();
 
-      return res.status(200).json({
-          message: 'Featured products retrieved successfully',
-          error: false,
-          success: true,
-          data: products,
-          count: products.length
-      });
+        return res.status(200).json({
+            message: 'Featured products retrieved successfully',
+            error: false,
+            success: true,
+            data: products,
+            count: products.length
+        });
 
-  } catch (error) {
-      console.error('Get Featured Products Error:', error);
+    } catch (error) {
+        console.error('Get Featured Products Error:', error);
 
-      return res.status(500).json({
-          message: error.message || 'Failed to retrieve featured products',
-          error: true,
-          success: false
-      });
-  }
+        return res.status(500).json({
+            message: error.message || 'Failed to retrieve featured products',
+            error: true,
+            success: false
+        });
+    }
 }
 
 /**
@@ -773,65 +773,784 @@ export async function getFeaturedProducts(req, res) {
  * @access  Public
  */
 export async function getProductsByCategory(req, res) {
-  try {
-      const { categoryId } = req.params;
-      const { page = 1, limit = 10, sort = '-createdAt' } = req.query;
+    try {
+        const { categoryId } = req.params;
+        const { page = 1, limit = 10, sort = '-createdAt' } = req.query;
 
-      // Validate category ID
-      if (!mongoose.Types.ObjectId.isValid(categoryId)) {
-          return res.status(400).json({
-              message: 'Invalid category ID format',
-              error: true,
-              success: false
-          });
-      }
+        // Validate category ID
+        if (!mongoose.Types.ObjectId.isValid(categoryId)) {
+            return res.status(400).json({
+                message: 'Invalid category ID format',
+                error: true,
+                success: false
+            });
+        }
 
-      const pageNum = parseInt(page);
-      const limitNum = parseInt(limit);
-      const skip = (pageNum - 1) * limitNum;
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+        const skip = (pageNum - 1) * limitNum;
 
-      // Build sort object
-      let sortObj = {};
-      if (sort.startsWith('-')) {
-          sortObj[sort.substring(1)] = -1;
-      } else {
-          sortObj[sort] = 1;
-      }
+        // Build sort object
+        let sortObj = {};
+        if (sort.startsWith('-')) {
+            sortObj[sort.substring(1)] = -1;
+        } else {
+            sortObj[sort] = 1;
+        }
 
-      const totalProducts = await ProductModel.countDocuments({ category: categoryId });
-      const totalPages = Math.ceil(totalProducts / limitNum);
+        const totalProducts = await ProductModel.countDocuments({ category: categoryId });
+        const totalPages = Math.ceil(totalProducts / limitNum);
 
-      const products = await ProductModel
-          .find({ category: categoryId })
-          .sort(sortObj)
-          .skip(skip)
-          .limit(limitNum)
-          .populate('category', 'name slug color')
-          .select('-__v')
-          .lean();
+        const products = await ProductModel
+            .find({ category: categoryId })
+            .sort(sortObj)
+            .skip(skip)
+            .limit(limitNum)
+            .populate('category', 'name slug color')
+            .select('-__v')
+            .lean();
 
-      return res.status(200).json({
-          message: 'Products retrieved successfully',
-          error: false,
-          success: true,
-          data: products,
-          pagination: {
-              currentPage: pageNum,
-              totalPages,
-              totalProducts,
-              limit: limitNum,
-              hasNextPage: pageNum < totalPages,
-              hasPrevPage: pageNum > 1
-          }
-      });
+        return res.status(200).json({
+            message: 'Products retrieved successfully',
+            error: false,
+            success: true,
+            data: products,
+            pagination: {
+                currentPage: pageNum,
+                totalPages,
+                totalProducts,
+                limit: limitNum,
+                hasNextPage: pageNum < totalPages,
+                hasPrevPage: pageNum > 1
+            }
+        });
 
-  } catch (error) {
-      console.error('Get Products By Category Error:', error);
+    } catch (error) {
+        console.error('Get Products By Category Error:', error);
 
-      return res.status(500).json({
-          message: error.message || 'Failed to retrieve products',
-          error: true,
-          success: false
-      });
-  }
+        return res.status(500).json({
+            message: error.message || 'Failed to retrieve products',
+            error: true,
+            success: false
+        });
+    }
+}
+
+/**
+ * @desc    Get all products by catId
+ * @route   GET /api/products/catId/:catId
+ * @access  Public
+ */
+export async function getProductsByCatId(req, res) {
+    try {
+        const { catId } = req.params;
+        const {
+            page = 1,
+            limit = 10,
+            sort = '-createdAt',
+            minPrice,
+            maxPrice,
+            brand,
+            rating,
+            inStock,
+            discount,
+            productRam,
+            size,
+            productWeight,
+            location
+        } = req.query;
+
+        // ================ VALIDATE PARAMETERS ================
+        
+        if (!catId || !catId.trim()) {
+            return res.status(400).json({
+                message: 'Category ID is required',
+                error: true,
+                success: false
+            });
+        }
+
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+
+        if (isNaN(pageNum) || pageNum < 1) {
+            return res.status(400).json({
+                message: 'Invalid page number. Must be a positive integer',
+                error: true,
+                success: false
+            });
+        }
+
+        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+            return res.status(400).json({
+                message: 'Invalid limit. Must be between 1 and 100',
+                error: true,
+                success: false
+            });
+        }
+
+        // ================ BUILD FILTER OBJECT ================
+        
+        const filter = { catId: catId.trim() };
+
+        // Price range filter
+        if (minPrice || maxPrice) {
+            filter.price = {};
+            if (minPrice) {
+                const minPriceNum = parseFloat(minPrice);
+                if (!isNaN(minPriceNum) && minPriceNum >= 0) {
+                    filter.price.$gte = minPriceNum;
+                }
+            }
+            if (maxPrice) {
+                const maxPriceNum = parseFloat(maxPrice);
+                if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
+                    filter.price.$lte = maxPriceNum;
+                }
+            }
+        }
+
+        // Brand filter
+        if (brand) {
+            filter.brand = { $regex: brand.trim(), $options: 'i' };
+        }
+
+        // Rating filter
+        if (rating) {
+            const ratingNum = parseFloat(rating);
+            if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
+                filter.rating = { $gte: ratingNum };
+            }
+        }
+
+        // In stock filter
+        if (inStock !== undefined) {
+            if (inStock === 'true' || inStock === true) {
+                filter.countInStock = { $gt: 0 };
+            } else if (inStock === 'false' || inStock === false) {
+                filter.countInStock = 0;
+            }
+        }
+
+        // Discount filter
+        if (discount) {
+            const discountNum = parseFloat(discount);
+            if (!isNaN(discountNum) && discountNum >= 0) {
+                filter.discount = { $gte: discountNum };
+            }
+        }
+
+        // Product RAM filter (multiple values)
+        if (productRam) {
+            filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
+        }
+
+        // Size filter (multiple values)
+        if (size) {
+            filter.size = { $in: size.split(',').map(s => s.trim()) };
+        }
+
+        // Product weight filter (multiple values)
+        if (productWeight) {
+            filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
+        }
+
+        // Location filter
+        if (location) {
+            filter['location.value'] = { $regex: location.trim(), $options: 'i' };
+        }
+
+        // ================ BUILD SORT OBJECT ================
+        
+        let sortObj = {};
+        
+        if (sort) {
+            const sortFields = sort.split(',');
+            sortFields.forEach(field => {
+                if (field.startsWith('-')) {
+                    sortObj[field.substring(1)] = -1; // Descending
+                } else {
+                    sortObj[field] = 1; // Ascending
+                }
+            });
+        } else {
+            sortObj = { createdAt: -1 }; // Default: newest first
+        }
+
+        // ================ EXECUTE QUERY ================
+        
+        const skip = (pageNum - 1) * limitNum;
+
+        // Get total count
+        const totalProducts = await ProductModel.countDocuments(filter);
+        const totalPages = Math.ceil(totalProducts / limitNum);
+
+        // Return 404 if no products found on first page
+        if (totalProducts === 0 && pageNum === 1) {
+            return res.status(404).json({
+                message: 'No products found for this category ID',
+                error: true,
+                success: false,
+                data: [],
+                pagination: {
+                    currentPage: pageNum,
+                    totalPages: 0,
+                    totalProducts: 0,
+                    limit: limitNum,
+                    hasNextPage: false,
+                    hasPrevPage: false,
+                    nextPage: null,
+                    prevPage: null
+                }
+            });
+        }
+
+        // Get products with pagination
+        const products = await ProductModel
+            .find(filter)
+            .sort(sortObj)
+            .skip(skip)
+            .limit(limitNum)
+            .populate('category', 'name slug color')
+            .select('-__v')
+            .lean();
+
+        // ================ GET FILTER AGGREGATIONS ================
+        
+        // Get available brands for this catId
+        const availableBrands = await ProductModel.distinct('brand', { catId: catId.trim(), brand: { $ne: '' } });
+        
+        // Get price range
+        const priceRange = await ProductModel.aggregate([
+            { $match: { catId: catId.trim() } },
+            {
+                $group: {
+                    _id: null,
+                    minPrice: { $min: '$price' },
+                    maxPrice: { $max: '$price' }
+                }
+            }
+        ]);
+
+        // Get available RAM options
+        const availableRam = await ProductModel.distinct('productRam', { catId: catId.trim() });
+        
+        // Get available sizes
+        const availableSizes = await ProductModel.distinct('size', { catId: catId.trim() });
+
+        // ================ PREPARE RESPONSE ================
+        
+        return res.status(200).json({
+            message: 'Products retrieved successfully',
+            error: false,
+            success: true,
+            data: products,
+            pagination: {
+                currentPage: pageNum,
+                totalPages,
+                totalProducts,
+                limit: limitNum,
+                hasNextPage: pageNum < totalPages,
+                hasPrevPage: pageNum > 1,
+                nextPage: pageNum < totalPages ? pageNum + 1 : null,
+                prevPage: pageNum > 1 ? pageNum - 1 : null
+            },
+            appliedFilters: {
+                catId: catId.trim(),
+                brand: brand || null,
+                priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
+                rating: rating || null,
+                inStock: inStock !== undefined ? inStock : null,
+                discount: discount || null,
+                productRam: productRam || null,
+                size: size || null,
+                productWeight: productWeight || null,
+                location: location || null
+            },
+            availableFilters: {
+                brands: availableBrands.sort(),
+                priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
+                ramOptions: availableRam.flat().filter(Boolean).sort(),
+                sizeOptions: availableSizes.flat().filter(Boolean).sort()
+            }
+        });
+
+    } catch (error) {
+        console.error('Get Products By CatId Error:', error);
+
+        return res.status(500).json({
+            message: error.message || 'Failed to retrieve products',
+            error: true,
+            success: false
+        });
+    }
+}
+
+/**
+ * @desc    Get all products by subCatId (with advanced filtering)
+ * @route   GET /api/products/subCatId/:subCatId
+ * @access  Public
+ */
+export async function getProductsBySubCatId(req, res) {
+    try {
+        const { subCatId } = req.params;
+        const {
+            page = 1,
+            limit = 10,
+            sort = '-createdAt',
+            minPrice,
+            maxPrice,
+            brand,
+            rating,
+            inStock,
+            discount,
+            productRam,
+            size,
+            productWeight
+        } = req.query;
+
+        // ================ VALIDATE PARAMETERS ================
+        
+        if (!subCatId || !subCatId.trim()) {
+            return res.status(400).json({
+                message: 'Sub-category ID is required',
+                error: true,
+                success: false
+            });
+        }
+
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+
+        if (isNaN(pageNum) || pageNum < 1) {
+            return res.status(400).json({
+                message: 'Invalid page number. Must be a positive integer',
+                error: true,
+                success: false
+            });
+        }
+
+        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+            return res.status(400).json({
+                message: 'Invalid limit. Must be between 1 and 100',
+                error: true,
+                success: false
+            });
+        }
+
+        // ================ BUILD FILTER OBJECT ================
+        
+        const filter = { subCatId: subCatId.trim() };
+
+        // Price range filter
+        if (minPrice || maxPrice) {
+            filter.price = {};
+            if (minPrice) {
+                const minPriceNum = parseFloat(minPrice);
+                if (!isNaN(minPriceNum) && minPriceNum >= 0) {
+                    filter.price.$gte = minPriceNum;
+                }
+            }
+            if (maxPrice) {
+                const maxPriceNum = parseFloat(maxPrice);
+                if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
+                    filter.price.$lte = maxPriceNum;
+                }
+            }
+        }
+
+        // Brand filter
+        if (brand) {
+            filter.brand = { $regex: brand.trim(), $options: 'i' };
+        }
+
+        // Rating filter
+        if (rating) {
+            const ratingNum = parseFloat(rating);
+            if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
+                filter.rating = { $gte: ratingNum };
+            }
+        }
+
+        // In stock filter
+        if (inStock !== undefined) {
+            if (inStock === 'true' || inStock === true) {
+                filter.countInStock = { $gt: 0 };
+            } else if (inStock === 'false' || inStock === false) {
+                filter.countInStock = 0;
+            }
+        }
+
+        // Discount filter
+        if (discount) {
+            const discountNum = parseFloat(discount);
+            if (!isNaN(discountNum) && discountNum >= 0) {
+                filter.discount = { $gte: discountNum };
+            }
+        }
+
+        // Product RAM filter
+        if (productRam) {
+            filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
+        }
+
+        // Size filter
+        if (size) {
+            filter.size = { $in: size.split(',').map(s => s.trim()) };
+        }
+
+        // Product weight filter
+        if (productWeight) {
+            filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
+        }
+
+        // ================ BUILD SORT OBJECT ================
+        
+        let sortObj = {};
+        
+        if (sort) {
+            const sortFields = sort.split(',');
+            sortFields.forEach(field => {
+                if (field.startsWith('-')) {
+                    sortObj[field.substring(1)] = -1;
+                } else {
+                    sortObj[field] = 1;
+                }
+            });
+        } else {
+            sortObj = { createdAt: -1 };
+        }
+
+        // ================ EXECUTE QUERY ================
+        
+        const skip = (pageNum - 1) * limitNum;
+
+        const totalProducts = await ProductModel.countDocuments(filter);
+        const totalPages = Math.ceil(totalProducts / limitNum);
+
+        if (totalProducts === 0 && pageNum === 1) {
+            return res.status(404).json({
+                message: 'No products found for this sub-category ID',
+                error: true,
+                success: false,
+                data: [],
+                pagination: {
+                    currentPage: pageNum,
+                    totalPages: 0,
+                    totalProducts: 0,
+                    limit: limitNum,
+                    hasNextPage: false,
+                    hasPrevPage: false
+                }
+            });
+        }
+
+        const products = await ProductModel
+            .find(filter)
+            .sort(sortObj)
+            .skip(skip)
+            .limit(limitNum)
+            .populate('category', 'name slug color')
+            .select('-__v')
+            .lean();
+
+        // ================ GET FILTER AGGREGATIONS ================
+        
+        const availableBrands = await ProductModel.distinct('brand', { subCatId: subCatId.trim(), brand: { $ne: '' } });
+        
+        const priceRange = await ProductModel.aggregate([
+            { $match: { subCatId: subCatId.trim() } },
+            {
+                $group: {
+                    _id: null,
+                    minPrice: { $min: '$price' },
+                    maxPrice: { $max: '$price' }
+                }
+            }
+        ]);
+
+        const availableRam = await ProductModel.distinct('productRam', { subCatId: subCatId.trim() });
+        const availableSizes = await ProductModel.distinct('size', { subCatId: subCatId.trim() });
+
+        // ================ PREPARE RESPONSE ================
+        
+        return res.status(200).json({
+            message: 'Products retrieved successfully',
+            error: false,
+            success: true,
+            data: products,
+            pagination: {
+                currentPage: pageNum,
+                totalPages,
+                totalProducts,
+                limit: limitNum,
+                hasNextPage: pageNum < totalPages,
+                hasPrevPage: pageNum > 1,
+                nextPage: pageNum < totalPages ? pageNum + 1 : null,
+                prevPage: pageNum > 1 ? pageNum - 1 : null
+            },
+            appliedFilters: {
+                subCatId: subCatId.trim(),
+                brand: brand || null,
+                priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
+                rating: rating || null,
+                inStock: inStock !== undefined ? inStock : null,
+                discount: discount || null,
+                productRam: productRam || null,
+                size: size || null,
+                productWeight: productWeight || null
+            },
+            availableFilters: {
+                brands: availableBrands.sort(),
+                priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
+                ramOptions: availableRam.flat().filter(Boolean).sort(),
+                sizeOptions: availableSizes.flat().filter(Boolean).sort()
+            }
+        });
+
+    } catch (error) {
+        console.error('Get Products By SubCatId Error:', error);
+
+        return res.status(500).json({
+            message: error.message || 'Failed to retrieve products',
+            error: true,
+            success: false
+        });
+    }
+}
+
+/**
+ * @desc    Get all products by thirdSubCatId (with advanced filtering)
+ * @route   GET /api/products/thirdSubCatId/:thirdSubCatId
+ * @access  Public
+ */
+export async function getProductsByThirdSubCatId(req, res) {
+    try {
+        const { thirdSubCatId } = req.params;
+        const {
+            page = 1,
+            limit = 10,
+            sort = '-createdAt',
+            minPrice,
+            maxPrice,
+            brand,
+            rating,
+            inStock,
+            discount,
+            productRam,
+            size,
+            productWeight
+        } = req.query;
+
+        // ================ VALIDATE PARAMETERS ================
+        
+        if (!thirdSubCatId || !thirdSubCatId.trim()) {
+            return res.status(400).json({
+                message: 'Third sub-category ID is required',
+                error: true,
+                success: false
+            });
+        }
+
+        const pageNum = parseInt(page);
+        const limitNum = parseInt(limit);
+
+        if (isNaN(pageNum) || pageNum < 1) {
+            return res.status(400).json({
+                message: 'Invalid page number. Must be a positive integer',
+                error: true,
+                success: false
+            });
+        }
+
+        if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+            return res.status(400).json({
+                message: 'Invalid limit. Must be between 1 and 100',
+                error: true,
+                success: false
+            });
+        }
+
+        // ================ BUILD FILTER OBJECT ================
+        
+        const filter = { thirdSubCatId: thirdSubCatId.trim() };
+
+        // Price range filter
+        if (minPrice || maxPrice) {
+            filter.price = {};
+            if (minPrice) {
+                const minPriceNum = parseFloat(minPrice);
+                if (!isNaN(minPriceNum) && minPriceNum >= 0) {
+                    filter.price.$gte = minPriceNum;
+                }
+            }
+            if (maxPrice) {
+                const maxPriceNum = parseFloat(maxPrice);
+                if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
+                    filter.price.$lte = maxPriceNum;
+                }
+            }
+        }
+
+        // Brand filter
+        if (brand) {
+            filter.brand = { $regex: brand.trim(), $options: 'i' };
+        }
+
+        // Rating filter
+        if (rating) {
+            const ratingNum = parseFloat(rating);
+            if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
+                filter.rating = { $gte: ratingNum };
+            }
+        }
+
+        // In stock filter
+        if (inStock !== undefined) {
+            if (inStock === 'true' || inStock === true) {
+                filter.countInStock = { $gt: 0 };
+            } else if (inStock === 'false' || inStock === false) {
+                filter.countInStock = 0;
+            }
+        }
+
+        // Discount filter
+        if (discount) {
+            const discountNum = parseFloat(discount);
+            if (!isNaN(discountNum) && discountNum >= 0) {
+                filter.discount = { $gte: discountNum };
+            }
+        }
+
+        // Product RAM filter
+        if (productRam) {
+            filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
+        }
+
+        // Size filter
+        if (size) {
+            filter.size = { $in: size.split(',').map(s => s.trim()) };
+        }
+
+        // Product weight filter
+        if (productWeight) {
+            filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
+        }
+
+        // ================ BUILD SORT OBJECT ================
+        
+        let sortObj = {};
+        
+        if (sort) {
+            const sortFields = sort.split(',');
+            sortFields.forEach(field => {
+                if (field.startsWith('-')) {
+                    sortObj[field.substring(1)] = -1;
+                } else {
+                    sortObj[field] = 1;
+                }
+            });
+        } else {
+            sortObj = { createdAt: -1 };
+        }
+
+        // ================ EXECUTE QUERY ================
+        
+        const skip = (pageNum - 1) * limitNum;
+
+        const totalProducts = await ProductModel.countDocuments(filter);
+        const totalPages = Math.ceil(totalProducts / limitNum);
+
+        if (totalProducts === 0 && pageNum === 1) {
+            return res.status(404).json({
+                message: 'No products found for this third sub-category ID',
+                error: true,
+                success: false,
+                data: [],
+                pagination: {
+                    currentPage: pageNum,
+                    totalPages: 0,
+                    totalProducts: 0,
+                    limit: limitNum,
+                    hasNextPage: false,
+                    hasPrevPage: false
+                }
+            });
+        }
+
+        const products = await ProductModel
+            .find(filter)
+            .sort(sortObj)
+            .skip(skip)
+            .limit(limitNum)
+            .populate('category', 'name slug color')
+            .select('-__v')
+            .lean();
+
+        // ================ GET FILTER AGGREGATIONS ================
+        
+        const availableBrands = await ProductModel.distinct('brand', { 
+            thirdSubCatId: thirdSubCatId.trim(), 
+            brand: { $ne: '' } 
+        });
+        
+        const priceRange = await ProductModel.aggregate([
+            { $match: { thirdSubCatId: thirdSubCatId.trim() } },
+            {
+                $group: {
+                    _id: null,
+                    minPrice: { $min: '$price' },
+                    maxPrice: { $max: '$price' }
+                }
+            }
+        ]);
+
+        const availableRam = await ProductModel.distinct('productRam', { thirdSubCatId: thirdSubCatId.trim() });
+        const availableSizes = await ProductModel.distinct('size', { thirdSubCatId: thirdSubCatId.trim() });
+
+        // ================ PREPARE RESPONSE ================
+        
+        return res.status(200).json({
+            message: 'Products retrieved successfully',
+            error: false,
+            success: true,
+            data: products,
+            pagination: {
+                currentPage: pageNum,
+                totalPages,
+                totalProducts,
+                limit: limitNum,
+                hasNextPage: pageNum < totalPages,
+                hasPrevPage: pageNum > 1,
+                nextPage: pageNum < totalPages ? pageNum + 1 : null,
+                prevPage: pageNum > 1 ? pageNum - 1 : null
+            },
+            appliedFilters: {
+                thirdSubCatId: thirdSubCatId.trim(),
+                brand: brand || null,
+                priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
+                rating: rating || null,
+                inStock: inStock !== undefined ? inStock : null,
+                discount: discount || null,
+                productRam: productRam || null,
+                size: size || null,
+                productWeight: productWeight || null
+            },
+            availableFilters: {
+                brands: availableBrands.sort(),
+                priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
+                ramOptions: availableRam.flat().filter(Boolean).sort(),
+                sizeOptions: availableSizes.flat().filter(Boolean).sort()
+            }
+        });
+
+    } catch (error) {
+        console.error('Get Products By ThirdSubCatId Error:', error);
+
+        return res.status(500).json({
+            message: error.message || 'Failed to retrieve products',
+            error: true,
+            success: false
+        });
+    }
 }
