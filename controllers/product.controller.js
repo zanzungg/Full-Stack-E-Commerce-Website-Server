@@ -1554,3 +1554,631 @@ export async function getProductsByThirdSubCatId(req, res) {
         });
     }
 }
+
+/**
+ * @desc    Get all products by catName (with advanced filtering)
+ * @route   GET /api/products/catName/:catName
+ * @access  Public
+ */
+export async function getProductsByCatName(req, res) {
+  try {
+      const { catName } = req.params;
+      const {
+          page = 1,
+          limit = 10,
+          sort = '-createdAt',
+          minPrice,
+          maxPrice,
+          brand,
+          rating,
+          inStock,
+          discount,
+          productRam,
+          size,
+          productWeight,
+          location
+      } = req.query;
+
+      // ================ VALIDATE PARAMETERS ================
+      
+      if (!catName || !catName.trim()) {
+          return res.status(400).json({
+              message: 'Category name is required',
+              error: true,
+              success: false
+          });
+      }
+
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+
+      if (isNaN(pageNum) || pageNum < 1) {
+          return res.status(400).json({
+              message: 'Invalid page number. Must be a positive integer',
+              error: true,
+              success: false
+          });
+      }
+
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+          return res.status(400).json({
+              message: 'Invalid limit. Must be between 1 and 100',
+              error: true,
+              success: false
+          });
+      }
+
+      // ================ BUILD FILTER OBJECT ================
+      
+      // Decode URL-encoded catName (e.g., "Smart%20Phones" -> "Smart Phones")
+      const decodedCatName = decodeURIComponent(catName.trim());
+      
+      // Case-insensitive regex match for catName
+      const filter = { 
+          catName: { $regex: `^${decodedCatName}$`, $options: 'i' } 
+      };
+
+      // Price range filter
+      if (minPrice || maxPrice) {
+          filter.price = {};
+          if (minPrice) {
+              const minPriceNum = parseFloat(minPrice);
+              if (!isNaN(minPriceNum) && minPriceNum >= 0) {
+                  filter.price.$gte = minPriceNum;
+              }
+          }
+          if (maxPrice) {
+              const maxPriceNum = parseFloat(maxPrice);
+              if (!isNaN(maxPriceNum) && maxPriceNum >= 0) {
+                  filter.price.$lte = maxPriceNum;
+              }
+          }
+      }
+
+      // Brand filter
+      if (brand) {
+          filter.brand = { $regex: brand.trim(), $options: 'i' };
+      }
+
+      // Rating filter
+      if (rating) {
+          const ratingNum = parseFloat(rating);
+          if (!isNaN(ratingNum) && ratingNum >= 0 && ratingNum <= 5) {
+              filter.rating = { $gte: ratingNum };
+          }
+      }
+
+      // In stock filter
+      if (inStock !== undefined) {
+          if (inStock === 'true' || inStock === true) {
+              filter.countInStock = { $gt: 0 };
+          } else if (inStock === 'false' || inStock === false) {
+              filter.countInStock = 0;
+          }
+      }
+
+      // Discount filter
+      if (discount) {
+          const discountNum = parseFloat(discount);
+          if (!isNaN(discountNum) && discountNum >= 0) {
+              filter.discount = { $gte: discountNum };
+          }
+      }
+
+      // Product RAM filter (multiple values)
+      if (productRam) {
+          filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
+      }
+
+      // Size filter (multiple values)
+      if (size) {
+          filter.size = { $in: size.split(',').map(s => s.trim()) };
+      }
+
+      // Product weight filter (multiple values)
+      if (productWeight) {
+          filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
+      }
+
+      // Location filter
+      if (location) {
+          filter['location.value'] = { $regex: location.trim(), $options: 'i' };
+      }
+
+      // ================ BUILD SORT OBJECT ================
+      
+      let sortObj = {};
+      
+      if (sort) {
+          const sortFields = sort.split(',');
+          sortFields.forEach(field => {
+              if (field.startsWith('-')) {
+                  sortObj[field.substring(1)] = -1; // Descending
+              } else {
+                  sortObj[field] = 1; // Ascending
+              }
+          });
+      } else {
+          sortObj = { createdAt: -1 }; // Default: newest first
+      }
+
+      // ================ EXECUTE QUERY ================
+      
+      const skip = (pageNum - 1) * limitNum;
+
+      // Get total count
+      const totalProducts = await ProductModel.countDocuments(filter);
+      const totalPages = Math.ceil(totalProducts / limitNum);
+
+      // Return empty result if no products found
+      if (totalProducts === 0 && pageNum === 1) {
+          return res.status(200).json({
+              message: `No products found for category: ${decodedCatName}`,
+              error: false,
+              success: true,
+              data: [],
+              pagination: {
+                  currentPage: pageNum,
+                  totalPages: 0,
+                  totalProducts: 0,
+                  limit: limitNum,
+                  hasNextPage: false,
+                  hasPrevPage: false,
+                  nextPage: null,
+                  prevPage: null
+              },
+              appliedFilters: {
+                  catName: decodedCatName
+              },
+              availableFilters: {
+                  brands: [],
+                  priceRange: { minPrice: 0, maxPrice: 0 },
+                  ramOptions: [],
+                  sizeOptions: []
+              }
+          });
+      }
+
+      // Get products with pagination
+      const products = await ProductModel
+          .find(filter)
+          .sort(sortObj)
+          .skip(skip)
+          .limit(limitNum)
+          .populate('category', 'name slug color')
+          .select('-__v')
+          .lean();
+
+      // ================ GET FILTER AGGREGATIONS ================
+      
+      // Get available brands for this catName
+      const availableBrands = await ProductModel.distinct('brand', { 
+          catName: { $regex: `^${decodedCatName}$`, $options: 'i' },
+          brand: { $ne: '' } 
+      });
+      
+      // Get price range
+      const priceRange = await ProductModel.aggregate([
+          { $match: { catName: { $regex: `^${decodedCatName}$`, $options: 'i' } } },
+          {
+              $group: {
+                  _id: null,
+                  minPrice: { $min: '$price' },
+                  maxPrice: { $max: '$price' }
+              }
+          }
+      ]);
+
+      // Get available RAM options
+      const availableRam = await ProductModel.distinct('productRam', { 
+          catName: { $regex: `^${decodedCatName}$`, $options: 'i' } 
+      });
+      
+      // Get available sizes
+      const availableSizes = await ProductModel.distinct('size', { 
+          catName: { $regex: `^${decodedCatName}$`, $options: 'i' } 
+      });
+
+      // Get available locations
+      const availableLocations = await ProductModel.aggregate([
+          { $match: { catName: { $regex: `^${decodedCatName}$`, $options: 'i' } } },
+          { $unwind: '$location' },
+          { $group: { _id: '$location.value' } },
+          { $sort: { _id: 1 } }
+      ]);
+
+      // Get subcategories (subCat) under this catName
+      const availableSubCats = await ProductModel.distinct('subCat', { 
+          catName: { $regex: `^${decodedCatName}$`, $options: 'i' },
+          subCat: { $ne: '' }
+      });
+
+      // ================ PREPARE RESPONSE ================
+      
+      return res.status(200).json({
+          message: 'Products retrieved successfully',
+          error: false,
+          success: true,
+          data: products,
+          pagination: {
+              currentPage: pageNum,
+              totalPages,
+              totalProducts,
+              limit: limitNum,
+              hasNextPage: pageNum < totalPages,
+              hasPrevPage: pageNum > 1,
+              nextPage: pageNum < totalPages ? pageNum + 1 : null,
+              prevPage: pageNum > 1 ? pageNum - 1 : null
+          },
+          appliedFilters: {
+              catName: decodedCatName,
+              brand: brand || null,
+              priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
+              rating: rating || null,
+              inStock: inStock !== undefined ? inStock : null,
+              discount: discount || null,
+              productRam: productRam || null,
+              size: size || null,
+              productWeight: productWeight || null,
+              location: location || null
+          },
+          availableFilters: {
+              brands: availableBrands.sort(),
+              priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
+              ramOptions: availableRam.flat().filter(Boolean).sort(),
+              sizeOptions: availableSizes.flat().filter(Boolean).sort(),
+              locations: availableLocations.map(loc => loc._id).filter(Boolean),
+              subCategories: availableSubCats.sort()
+          }
+      });
+
+  } catch (error) {
+      console.error('Get Products By CatName Error:', error);
+
+      return res.status(500).json({
+          message: error.message || 'Failed to retrieve products',
+          error: true,
+          success: false
+      });
+  }
+}
+
+/**
+ * @desc    Get all products by subCat (subcategory name)
+ * @route   GET /api/products/subCat/:subCat
+ * @access  Public
+ */
+export async function getProductsBySubCat(req, res) {
+  try {
+      const { subCat } = req.params;
+      const {
+          page = 1,
+          limit = 10,
+          sort = '-createdAt',
+          minPrice,
+          maxPrice,
+          brand,
+          rating,
+          inStock,
+          discount,
+          productRam,
+          size,
+          productWeight
+      } = req.query;
+
+      // ================ VALIDATE PARAMETERS ================
+      
+      if (!subCat || !subCat.trim()) {
+          return res.status(400).json({
+              message: 'Sub-category name is required',
+              error: true,
+              success: false
+          });
+      }
+
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+
+      if (isNaN(pageNum) || pageNum < 1) {
+          return res.status(400).json({
+              message: 'Invalid page number. Must be a positive integer',
+              error: true,
+              success: false
+          });
+      }
+
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+          return res.status(400).json({
+              message: 'Invalid limit. Must be between 1 and 100',
+              error: true,
+              success: false
+          });
+      }
+
+      // ================ BUILD FILTER OBJECT ================
+      
+      const decodedSubCat = decodeURIComponent(subCat.trim());
+      const filter = { 
+          subCat: { $regex: `^${decodedSubCat}$`, $options: 'i' } 
+      };
+
+      // Apply other filters
+      if (minPrice || maxPrice) {
+          filter.price = {};
+          if (minPrice) filter.price.$gte = parseFloat(minPrice);
+          if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
+      }
+
+      if (brand) filter.brand = { $regex: brand.trim(), $options: 'i' };
+      if (rating) filter.rating = { $gte: parseFloat(rating) };
+      
+      if (inStock !== undefined) {
+          filter.countInStock = inStock === 'true' ? { $gt: 0 } : 0;
+      }
+
+      if (discount) filter.discount = { $gte: parseFloat(discount) };
+      if (productRam) filter.productRam = { $in: productRam.split(',').map(ram => ram.trim()) };
+      if (size) filter.size = { $in: size.split(',').map(s => s.trim()) };
+      if (productWeight) filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
+
+      // ================ BUILD SORT OBJECT ================
+      
+      let sortObj = {};
+      if (sort) {
+          const sortFields = sort.split(',');
+          sortFields.forEach(field => {
+              sortObj[field.startsWith('-') ? field.substring(1) : field] = field.startsWith('-') ? -1 : 1;
+          });
+      } else {
+          sortObj = { createdAt: -1 };
+      }
+
+      // ================ EXECUTE QUERY ================
+      
+      const skip = (pageNum - 1) * limitNum;
+      const totalProducts = await ProductModel.countDocuments(filter);
+      const totalPages = Math.ceil(totalProducts / limitNum);
+
+      if (totalProducts === 0) {
+          return res.status(200).json({
+              message: `No products found for sub-category: ${decodedSubCat}`,
+              error: false,
+              success: true,
+              data: [],
+              pagination: {
+                  currentPage: pageNum,
+                  totalPages: 0,
+                  totalProducts: 0,
+                  limit: limitNum,
+                  hasNextPage: false,
+                  hasPrevPage: false
+              }
+          });
+      }
+
+      const products = await ProductModel
+          .find(filter)
+          .sort(sortObj)
+          .skip(skip)
+          .limit(limitNum)
+          .populate('category', 'name slug color')
+          .select('-__v')
+          .lean();
+
+      // ================ GET FILTER AGGREGATIONS ================
+      
+      const subCatRegex = { $regex: `^${decodedSubCat}$`, $options: 'i' };
+      
+      const availableBrands = await ProductModel.distinct('brand', { 
+          subCat: subCatRegex, 
+          brand: { $ne: '' } 
+      });
+      
+      const priceRange = await ProductModel.aggregate([
+          { $match: { subCat: subCatRegex } },
+          { $group: { _id: null, minPrice: { $min: '$price' }, maxPrice: { $max: '$price' } } }
+      ]);
+
+      const availableRam = await ProductModel.distinct('productRam', { subCat: subCatRegex });
+      const availableSizes = await ProductModel.distinct('size', { subCat: subCatRegex });
+      
+      // Get third subcategories under this subCat
+      const availableThirdSubCats = await ProductModel.distinct('thirdSubCat', { 
+          subCat: subCatRegex,
+          thirdSubCat: { $ne: '' }
+      });
+
+      // ================ PREPARE RESPONSE ================
+      
+      return res.status(200).json({
+          message: 'Products retrieved successfully',
+          error: false,
+          success: true,
+          data: products,
+          pagination: {
+              currentPage: pageNum,
+              totalPages,
+              totalProducts,
+              limit: limitNum,
+              hasNextPage: pageNum < totalPages,
+              hasPrevPage: pageNum > 1,
+              nextPage: pageNum < totalPages ? pageNum + 1 : null,
+              prevPage: pageNum > 1 ? pageNum - 1 : null
+          },
+          appliedFilters: {
+              subCat: decodedSubCat,
+              brand: brand || null,
+              priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
+              rating: rating || null,
+              inStock: inStock !== undefined ? inStock : null,
+              discount: discount || null
+          },
+          availableFilters: {
+              brands: availableBrands.sort(),
+              priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
+              ramOptions: availableRam.flat().filter(Boolean).sort(),
+              sizeOptions: availableSizes.flat().filter(Boolean).sort(),
+              thirdSubCategories: availableThirdSubCats.sort()
+          }
+      });
+
+  } catch (error) {
+      console.error('Get Products By SubCat Error:', error);
+
+      return res.status(500).json({
+          message: error.message || 'Failed to retrieve products',
+          error: true,
+          success: false
+      });
+  }
+}
+
+/**
+ * @desc    Get all products by thirdSubCat (third subcategory name)
+ * @route   GET /api/products/thirdSubCat/:thirdSubCat
+ * @access  Public
+ */
+export async function getProductsByThirdSubCat(req, res) {
+  try {
+      const { thirdSubCat } = req.params;
+      const {
+          page = 1,
+          limit = 10,
+          sort = '-createdAt',
+          minPrice,
+          maxPrice,
+          brand,
+          rating,
+          inStock,
+          discount,
+          productRam,
+          size,
+          productWeight
+      } = req.query;
+
+      // Validate parameters
+      if (!thirdSubCat || !thirdSubCat.trim()) {
+          return res.status(400).json({
+              message: 'Third sub-category name is required',
+              error: true,
+              success: false
+          });
+      }
+
+      const pageNum = parseInt(page);
+      const limitNum = parseInt(limit);
+
+      if (isNaN(pageNum) || pageNum < 1) {
+          return res.status(400).json({
+              message: 'Invalid page number. Must be a positive integer',
+              error: true,
+              success: false
+          });
+      }
+
+      if (isNaN(limitNum) || limitNum < 1 || limitNum > 100) {
+          return res.status(400).json({
+              message: 'Invalid limit. Must be between 1 and 100',
+              error: true,
+              success: false
+          });
+      }
+
+      // Build filter
+      const decodedThirdSubCat = decodeURIComponent(thirdSubCat.trim());
+      const filter = { 
+          thirdSubCat: { $regex: `^${decodedThirdSubCat}$`, $options: 'i' } 
+      };
+
+      if (minPrice || maxPrice) {
+          filter.price = {};
+          if (minPrice) filter.price.$gte = parseFloat(minPrice);
+          if (maxPrice) filter.price.$lte = parseFloat(maxPrice);
+      }
+
+      if (brand) filter.brand = { $regex: brand.trim(), $options: 'i' };
+      if (rating) filter.rating = { $gte: parseFloat(rating) };
+      if (inStock === 'true') filter.countInStock = { $gt: 0 };
+      if (discount) filter.discount = { $gte: parseFloat(discount) };
+      if (productRam) filter.productRam = { $in: productRam.split(',').map(r => r.trim()) };
+      if (size) filter.size = { $in: size.split(',').map(s => s.trim()) };
+      if (productWeight) filter.productWeight = { $in: productWeight.split(',').map(w => w.trim()) };
+
+      // Build sort
+      let sortObj = {};
+      if (sort) {
+          sort.split(',').forEach(field => {
+              sortObj[field.startsWith('-') ? field.substring(1) : field] = field.startsWith('-') ? -1 : 1;
+          });
+      } else {
+          sortObj = { createdAt: -1 };
+      }
+
+      // Execute query
+      const skip = (pageNum - 1) * limitNum;
+      const totalProducts = await ProductModel.countDocuments(filter);
+      const totalPages = Math.ceil(totalProducts / limitNum);
+
+      const products = await ProductModel
+          .find(filter)
+          .sort(sortObj)
+          .skip(skip)
+          .limit(limitNum)
+          .populate('category', 'name slug color')
+          .select('-__v')
+          .lean();
+
+      // Get aggregations
+      const thirdSubCatRegex = { $regex: `^${decodedThirdSubCat}$`, $options: 'i' };
+      
+      const [availableBrands, priceRange, availableRam, availableSizes] = await Promise.all([
+          ProductModel.distinct('brand', { thirdSubCat: thirdSubCatRegex, brand: { $ne: '' } }),
+          ProductModel.aggregate([
+              { $match: { thirdSubCat: thirdSubCatRegex } },
+              { $group: { _id: null, minPrice: { $min: '$price' }, maxPrice: { $max: '$price' } } }
+          ]),
+          ProductModel.distinct('productRam', { thirdSubCat: thirdSubCatRegex }),
+          ProductModel.distinct('size', { thirdSubCat: thirdSubCatRegex })
+      ]);
+
+      return res.status(200).json({
+          message: 'Products retrieved successfully',
+          error: false,
+          success: true,
+          data: products,
+          pagination: {
+              currentPage: pageNum,
+              totalPages,
+              totalProducts,
+              limit: limitNum,
+              hasNextPage: pageNum < totalPages,
+              hasPrevPage: pageNum > 1,
+              nextPage: pageNum < totalPages ? pageNum + 1 : null,
+              prevPage: pageNum > 1 ? pageNum - 1 : null
+          },
+          appliedFilters: {
+              thirdSubCat: decodedThirdSubCat,
+              brand: brand || null,
+              priceRange: minPrice || maxPrice ? { min: minPrice, max: maxPrice } : null,
+              rating: rating || null,
+              inStock: inStock || null,
+              discount: discount || null
+          },
+          availableFilters: {
+              brands: availableBrands.sort(),
+              priceRange: priceRange[0] || { minPrice: 0, maxPrice: 0 },
+              ramOptions: availableRam.flat().filter(Boolean).sort(),
+              sizeOptions: availableSizes.flat().filter(Boolean).sort()
+          }
+      });
+
+  } catch (error) {
+      console.error('Get Products By ThirdSubCat Error:', error);
+
+      return res.status(500).json({
+          message: error.message || 'Failed to retrieve products',
+          error: true,
+          success: false
+      });
+  }
+}

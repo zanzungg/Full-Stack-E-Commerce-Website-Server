@@ -6,7 +6,10 @@ import {
   getProductById, 
   getProductsByCategory, 
   getProductsByCatId, 
+  getProductsByCatName, 
+  getProductsBySubCat, 
   getProductsBySubCatId, 
+  getProductsByThirdSubCat, 
   getProductsByThirdSubCatId, 
   uploadImages 
 } from "../controllers/product.controller.js";
@@ -25,8 +28,16 @@ productRouter.post("/upload-images", auth, upload.array("images"), uploadImages)
 productRouter.get("/", getAllProducts);
 
 // IMPORTANT: Specific routes MUST come before dynamic routes
-// Get featured products - MUST be before /:id
 productRouter.get("/featured", getFeaturedProducts);
+
+// Get products by catName
+productRouter.get("/catName/:catName", getProductsByCatName);
+
+// Get products by subCatName
+productRouter.get("/subCat/:subCat", getProductsBySubCat);
+
+// Get products by thirdSubCatName
+productRouter.get("/thirdSubCat/:thirdSubCat", getProductsByThirdSubCat);
 
 // Get products by category
 productRouter.get("/category/:categoryId", getProductsByCategory);
