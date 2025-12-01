@@ -12,6 +12,7 @@ import userRouter from './routes/user.route.js';
 import categoryRouter from './routes/category.route.js';
 import productRouter from './routes/product.route.js';
 import cartRouter from './routes/cart.route.js';
+import myListRouter from './routes/mylist.route.js';
 
 const app = express();
 
@@ -37,6 +38,7 @@ app.use('/api/users', userRouter);
 app.use('/api/categories', categoryRouter);
 app.use('/api/products', productRouter);
 app.use('/api/cart', cartRouter);
+app.use('/api/mylist', myListRouter);
 
 connectDB().then(() => {
     app.listen(process.env.PORT, () => {

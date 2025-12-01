@@ -37,7 +37,6 @@ const cartProductSchema = new mongoose.Schema({
             message: '{VALUE} is not a valid status'
         },
         default: 'active',
-        index: true
     },
 }, { timestamps: true }
 );
