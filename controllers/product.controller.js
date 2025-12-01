@@ -861,3 +861,777 @@ export async function getProductsByThirdSubCat(req, res) {
   });
   return res.status(result.statusCode).json(result.data);
 }
+
+/**
+ * @desc    Get product counts and statistics
+ * @route   GET /api/products/stats/count
+ * @access  Public
+ */
+export async function getProductCounts(req, res) {
+  try {
+    // Build base filter using helper (supports all query filters)
+    const baseFilter = await buildProductFilter({}, req.query);
+
+    // Get comprehensive counts in parallel
+    const [
+      totalCount,
+      inStockCount,
+      outOfStockCount,
+      featuredCount,
+      discountedCount,
+      countsPerCategory,
+      countsPerBrand,
+      stockDistribution,
+      priceDistribution
+    ] = await Promise.all([
+      // Total products matching filters
+      ProductModel.countDocuments(baseFilter),
+      
+      // In stock products
+      ProductModel.countDocuments({ 
+          ...baseFilter, 
+          countInStock: { $gt: 0 } 
+      }),
+        
+      // Out of stock products
+      ProductModel.countDocuments({ 
+          ...baseFilter, 
+          countInStock: 0 
+      }),
+      
+      // Featured products
+      ProductModel.countDocuments({ 
+          ...baseFilter, 
+          isFeatured: true 
+      }),
+      
+      // Products with discount
+      ProductModel.countDocuments({ 
+          ...baseFilter, 
+          discount: { $gt: 0 } 
+      }),
+        
+      // Count by category (with category info)
+      ProductModel.aggregate([
+        { $match: baseFilter },
+        {
+            $lookup: {
+                from: 'categories',
+                localField: 'category',
+                foreignField: '_id',
+                as: 'categoryInfo'
+            }
+        },
+        { $unwind: '$categoryInfo' },
+        {
+            $group: {
+                _id: '$category',
+                categoryName: { $first: '$categoryInfo.name' },
+                count: { $sum: 1 },
+                inStock: {
+                    $sum: { $cond: [{ $gt: ['$countInStock', 0] }, 1, 0] }
+                },
+                outOfStock: {
+                    $sum: { $cond: [{ $eq: ['$countInStock', 0] }, 1, 0] }
+                }
+            }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 20 } // Top 20 categories
+      ]),
+        
+      // Count by brand (top brands)
+      ProductModel.aggregate([
+        { $match: { ...baseFilter, brand: { $ne: '', $exists: true } } },
+        {
+            $group: {
+                _id: '$brand',
+                count: { $sum: 1 },
+                avgPrice: { $avg: '$price' },
+                inStock: {
+                    $sum: { $cond: [{ $gt: ['$countInStock', 0] }, 1, 0] }
+                }
+            }
+        },
+        { $sort: { count: -1 } },
+        { $limit: 20 } // Top 20 brands
+      ]),
+        
+      // Stock distribution (by ranges)
+      ProductModel.aggregate([
+        { $match: baseFilter },
+        {
+          $bucket: {
+            groupBy: '$countInStock',
+            boundaries: [0, 1, 10, 50, 100, 500, 1000],
+            default: '1000+',
+            output: {
+              count: { $sum: 1 },
+              avgStock: { $avg: '$countInStock' }
+            }
+          }
+        }
+      ]),
+        
+      // Price distribution
+      ProductModel.aggregate([
+        { $match: baseFilter },
+        {
+          $bucket: {
+            groupBy: '$price',
+            boundaries: [0, 50, 100, 250, 500, 1000, 2000],
+            default: '2000+',
+            output: {
+              count: { $sum: 1 },
+              avgPrice: { $avg: '$price' }
+            }
+          }
+        }
+      ])
+    ]);
+
+    // Calculate additional statistics
+    const statistics = {
+      stockPercentage: totalCount > 0 
+        ? Math.round((inStockCount / totalCount) * 100) 
+        : 0,
+      featuredPercentage: totalCount > 0 
+        ? Math.round((featuredCount / totalCount) * 100) 
+        : 0,
+      discountedPercentage: totalCount > 0 
+        ? Math.round((discountedCount / totalCount) * 100) 
+        : 0
+    };
+
+    // Format stock distribution
+    const formattedStockDistribution = stockDistribution.map(bucket => ({
+      range: typeof bucket._id === 'string' 
+          ? bucket._id 
+          : `${bucket._id}-${bucket._id === 0 ? '0' : (bucket._id < 1000 ? 'next range' : '+')}`,
+      count: bucket.count,
+      avgStock: Math.round(bucket.avgStock || 0)
+    }));
+
+    // Format price distribution
+    const formattedPriceDistribution = priceDistribution.map(bucket => ({
+      range: typeof bucket._id === 'string' 
+        ? bucket._id 
+        : `$${bucket._id}-$${bucket._id + 50}`,
+      count: bucket.count,
+      avgPrice: Math.round(bucket.avgPrice || 0)
+    }));
+
+    // Get applied filters for reference
+    const appliedFilters = buildAppliedFilters(req.query);
+
+    return res.status(200).json({
+      message: 'Product counts retrieved successfully',
+      error: false,
+      success: true,
+      data: {
+        summary: {
+          total: totalCount,
+          inStock: inStockCount,
+          outOfStock: outOfStockCount,
+          featured: featuredCount,
+          discounted: discountedCount
+        },
+        statistics: {
+          stockPercentage: statistics.stockPercentage,
+          featuredPercentage: statistics.featuredPercentage,
+          discountedPercentage: statistics.discountedPercentage
+        },
+        byCategory: countsPerCategory.map(cat => ({
+          categoryId: cat._id,
+          categoryName: cat.categoryName,
+          total: cat.count,
+          inStock: cat.inStock,
+          outOfStock: cat.outOfStock,
+          stockRate: Math.round((cat.inStock / cat.count) * 100)
+        })),
+        byBrand: countsPerBrand.map(brand => ({
+          brand: brand._id,
+          total: brand.count,
+          inStock: brand.inStock,
+          avgPrice: Math.round(brand.avgPrice),
+          stockRate: Math.round((brand.inStock / brand.count) * 100)
+        })),
+        distributions: {
+          stock: formattedStockDistribution,
+          price: formattedPriceDistribution
+        },
+        appliedFilters: Object.keys(appliedFilters).some(key => 
+          appliedFilters[key] !== null && appliedFilters[key] !== undefined
+        ) ? appliedFilters : null
+      }
+    });
+
+  } catch (error) {
+    console.error('Get Products Count Error:', error);
+
+    return res.status(500).json({
+      message: error.message || 'Failed to get product counts',
+      error: true,
+      success: false
+    });
+  }
+}
+
+/**
+ * @desc    Update product by ID
+ * @route   PUT /api/products/:id
+ * @access  Private/Admin
+ */
+export async function updateProduct(req, res) {
+    try {
+        const { id } = req.params;
+        const {
+            name,
+            description,
+            brand,
+            price,
+            oldPrice,
+            catName,
+            catId,
+            subCatId,
+            subCat,
+            thirdSubCat,
+            thirdSubCatId,
+            category,
+            countInStock,
+            rating,
+            isFeatured,
+            discount,
+            productRam,
+            size,
+            productWeight,
+            location
+        } = req.body;
+
+        // ================ VALIDATION ================
+        
+        // 1. Validate product ID
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                message: 'Invalid product ID format',
+                error: true,
+                success: false
+            });
+        }
+
+        // 2. Find product
+        const product = await ProductModel.findById(id);
+        if (!product) {
+            return res.status(404).json({
+                message: 'Product not found',
+                error: true,
+                success: false
+            });
+        }
+
+        // 3. Validate category if provided
+        if (category) {
+            if (!mongoose.Types.ObjectId.isValid(category)) {
+                return res.status(400).json({
+                    message: 'Invalid category ID format',
+                    error: true,
+                    success: false
+                });
+            }
+
+            const categoryExists = await CategoryModel.findById(category);
+            if (!categoryExists) {
+                return res.status(404).json({
+                    message: 'Category not found',
+                    error: true,
+                    success: false
+                });
+            }
+        }
+
+        // 4. Validate price if provided
+        if (price !== undefined) {
+            const priceNum = parseFloat(price);
+            if (isNaN(priceNum) || priceNum < 0) {
+                return res.status(400).json({
+                    message: 'Price must be a positive number',
+                    error: true,
+                    success: false
+                });
+            }
+        }
+
+        // 5. Validate discount if provided
+        if (discount !== undefined) {
+            const discountNum = parseFloat(discount);
+            if (discountNum < 0 || discountNum > 100) {
+                return res.status(400).json({
+                    message: 'Discount must be between 0 and 100',
+                    error: true,
+                    success: false
+                });
+            }
+        }
+
+        // 6. Validate stock if provided
+        if (countInStock !== undefined) {
+            const stockNum = parseInt(countInStock);
+            if (isNaN(stockNum) || stockNum < 0) {
+                return res.status(400).json({
+                    message: 'Stock count must be a non-negative number',
+                    error: true,
+                    success: false
+                });
+            }
+        }
+
+        // 7. Validate rating if provided
+        if (rating !== undefined) {
+            const ratingNum = parseFloat(rating);
+            if (isNaN(ratingNum) || ratingNum < 0 || ratingNum > 5) {
+                return res.status(400).json({
+                    message: 'Rating must be between 0 and 5',
+                    error: true,
+                    success: false
+                });
+            }
+        }
+
+        // ================ PARSE ARRAYS ================
+        
+        const parseArrayField = (field) => {
+            if (!field) return undefined;
+            try {
+                if (Array.isArray(field)) return field;
+                if (typeof field === 'string') {
+                    return field.includes('[') 
+                        ? JSON.parse(field) 
+                        : field.split(',').map(item => item.trim()).filter(Boolean);
+                }
+                return undefined;
+            } catch (error) {
+                console.error('Error parsing array field:', error);
+                return undefined;
+            }
+        };
+
+        const parsedProductRam = parseArrayField(productRam);
+        const parsedSize = parseArrayField(size);
+        const parsedProductWeight = parseArrayField(productWeight);
+
+        // Parse location
+        let parsedLocation;
+        try {
+            if (location) {
+                if (Array.isArray(location)) {
+                    parsedLocation = location;
+                } else if (typeof location === 'string') {
+                    parsedLocation = JSON.parse(location);
+                }
+            }
+        } catch (error) {
+            console.error('Error parsing location:', error);
+        }
+
+        // ================ UPDATE FIELDS ================
+        
+        if (name) product.name = name.trim();
+        if (description) product.description = description.trim();
+        if (brand !== undefined) product.brand = brand.trim();
+        if (price !== undefined) product.price = parseFloat(price);
+        if (oldPrice !== undefined) product.oldPrice = parseFloat(oldPrice) || 0;
+        if (catName !== undefined) product.catName = catName.trim();
+        if (catId !== undefined) product.catId = catId;
+        if (subCatId !== undefined) product.subCatId = subCatId;
+        if (subCat !== undefined) product.subCat = subCat.trim();
+        if (thirdSubCat !== undefined) product.thirdSubCat = thirdSubCat.trim();
+        if (thirdSubCatId !== undefined) product.thirdSubCatId = thirdSubCatId;
+        if (category) product.category = category;
+        if (countInStock !== undefined) product.countInStock = parseInt(countInStock);
+        if (rating !== undefined) product.rating = parseFloat(rating);
+        if (isFeatured !== undefined) product.isFeatured = isFeatured === 'true' || isFeatured === true;
+        if (discount !== undefined) product.discount = parseFloat(discount);
+        if (parsedProductRam) product.productRam = parsedProductRam;
+        if (parsedSize) product.size = parsedSize;
+        if (parsedProductWeight) product.productWeight = parsedProductWeight;
+        if (parsedLocation) product.location = parsedLocation;
+
+        // Save updated product
+        await product.save();
+
+        // Populate category info for response
+        await product.populate('category', 'name slug color');
+
+        return res.status(200).json({
+            message: 'Product updated successfully',
+            error: false,
+            success: true,
+            data: product
+        });
+
+    } catch (error) {
+        console.error('Update Product Error:', error);
+
+        // Handle mongoose validation errors
+        if (error.name === 'ValidationError') {
+            const errors = Object.values(error.errors).map(err => err.message);
+            return res.status(400).json({
+                message: 'Validation failed',
+                error: true,
+                success: false,
+                details: errors
+            });
+        }
+
+        // Handle duplicate key error
+        if (error.code === 11000) {
+            return res.status(409).json({
+                message: 'Product with this name already exists',
+                error: true,
+                success: false
+            });
+        }
+
+        return res.status(500).json({
+            message: error.message || 'Failed to update product',
+            error: true,
+            success: false
+        });
+    }
+}
+
+/**
+ * @desc    Delete product by ID (with Cloudinary cleanup)
+ * @route   DELETE /api/products/:id
+ * @access  Private/Admin
+ */
+export async function deleteProduct(req, res) {
+    try {
+        const { id } = req.params;
+
+        // ================ VALIDATION ================
+        
+        // 1. Validate product ID format
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                message: 'Invalid product ID format',
+                error: true,
+                success: false
+            });
+        }
+
+        // 2. Find product
+        const product = await ProductModel.findById(id);
+        if (!product) {
+            return res.status(404).json({
+                message: 'Product not found',
+                error: true,
+                success: false
+            });
+        }
+
+        // ================ DELETE IMAGES FROM CLOUDINARY ================
+        
+        const deletedImages = [];
+        const failedImages = [];
+
+        if (product.images && product.images.length > 0) {
+            console.log(`Deleting ${product.images.length} images from Cloudinary...`);
+
+            // Delete all images in parallel
+            const deletePromises = product.images.map(async (img) => {
+                try {
+                    const result = await deleteImage(img.public_id);
+                    if (result) {
+                        deletedImages.push(img.public_id);
+                        return { success: true, public_id: img.public_id };
+                    } else {
+                        failedImages.push(img.public_id);
+                        return { success: false, public_id: img.public_id };
+                    }
+                } catch (error) {
+                    console.error(`Failed to delete image ${img.public_id}:`, error);
+                    failedImages.push(img.public_id);
+                    return { success: false, public_id: img.public_id, error: error.message };
+                }
+            });
+
+            await Promise.all(deletePromises);
+        }
+
+        // ================ DELETE PRODUCT FROM DATABASE ================
+        
+        await ProductModel.findByIdAndDelete(id);
+
+        // ================ PREPARE RESPONSE ================
+        
+        const response = {
+            message: 'Product deleted successfully',
+            error: false,
+            success: true,
+            data: {
+                productId: id,
+                productName: product.name,
+                imagesDeleted: deletedImages.length,
+                imagesFailed: failedImages.length
+            }
+        };
+
+        // Add warning if some images failed to delete
+        if (failedImages.length > 0) {
+            response.warning = `${failedImages.length} image(s) failed to delete from Cloudinary`;
+            response.data.failedImages = failedImages;
+        }
+
+        return res.status(200).json(response);
+
+    } catch (error) {
+        console.error('Delete Product Error:', error);
+
+        // Handle CastError (invalid ObjectId)
+        if (error.name === 'CastError') {
+            return res.status(400).json({
+                message: 'Invalid product ID',
+                error: true,
+                success: false
+            });
+        }
+
+        return res.status(500).json({
+            message: error.message || 'Failed to delete product',
+            error: true,
+            success: false
+        });
+    }
+}
+
+/**
+ * @desc    Delete single product image
+ * @route   DELETE /api/products/:id/images/:publicId
+ * @access  Private/Admin
+ */
+export async function deleteProductImage(req, res) {
+    try {
+        const { id, publicId } = req.params;
+
+        // ================ VALIDATION ================
+        
+        // 1. Validate product ID
+        if (!mongoose.Types.ObjectId.isValid(id)) {
+            return res.status(400).json({
+                message: 'Invalid product ID format',
+                error: true,
+                success: false
+            });
+        }
+
+        // 2. Validate public ID
+        if (!publicId || !publicId.trim()) {
+            return res.status(400).json({
+                message: 'Image public ID is required',
+                error: true,
+                success: false
+            });
+        }
+
+        // 3. Find product
+        const product = await ProductModel.findById(id);
+        if (!product) {
+            return res.status(404).json({
+                message: 'Product not found',
+                error: true,
+                success: false
+            });
+        }
+
+        // 4. Find image in product
+        const decodedPublicId = decodeURIComponent(publicId);
+        const imageIndex = product.images.findIndex(
+            img => img.public_id === decodedPublicId
+        );
+
+        if (imageIndex === -1) {
+            return res.status(404).json({
+                message: 'Image not found in product',
+                error: true,
+                success: false
+            });
+        }
+
+        // 5. Check if it's the last image
+        if (product.images.length === 1) {
+            return res.status(400).json({
+                message: 'Cannot delete the last image. Product must have at least one image',
+                error: true,
+                success: false
+            });
+        }
+
+        // ================ DELETE IMAGE ================
+        
+        try {
+            // Delete from Cloudinary
+            const deleteResult = await deleteImage(decodedPublicId);
+            
+            if (!deleteResult) {
+                console.warn(`Failed to delete image from Cloudinary: ${decodedPublicId}`);
+                // Continue anyway to remove from database
+            }
+
+            // Remove from product
+            product.images.splice(imageIndex, 1);
+            await product.save();
+
+            return res.status(200).json({
+                message: 'Image deleted successfully',
+                error: false,
+                success: true,
+                data: {
+                    deletedImage: decodedPublicId,
+                    remainingImages: product.images.length,
+                    images: product.images
+                }
+            });
+
+        } catch (deleteError) {
+            console.error('Error deleting image from Cloudinary:', deleteError);
+            
+            // Remove from database even if Cloudinary delete fails
+            product.images.splice(imageIndex, 1);
+            await product.save();
+
+            return res.status(200).json({
+                message: 'Image removed from product (Cloudinary deletion failed)',
+                error: false,
+                success: true,
+                warning: 'Image may still exist on Cloudinary',
+                data: {
+                    deletedImage: decodedPublicId,
+                    remainingImages: product.images.length,
+                    images: product.images
+                }
+            });
+        }
+
+    } catch (error) {
+        console.error('Delete Product Image Error:', error);
+
+        return res.status(500).json({
+            message: error.message || 'Failed to delete image',
+            error: true,
+            success: false
+        });
+    }
+}
+
+/**
+ * @desc    Bulk delete products
+ * @route   DELETE /api/products/bulk
+ * @access  Private/Admin
+ */
+export async function bulkDeleteProducts(req, res) {
+    try {
+        const { productIds } = req.body;
+
+        // ================ VALIDATION ================
+        
+        if (!productIds || !Array.isArray(productIds) || productIds.length === 0) {
+            return res.status(400).json({
+                message: 'Product IDs array is required',
+                error: true,
+                success: false
+            });
+        }
+
+        // Validate max bulk delete limit
+        if (productIds.length > 50) {
+            return res.status(400).json({
+                message: 'Maximum 50 products can be deleted at once',
+                error: true,
+                success: false
+            });
+        }
+
+        // Validate all IDs
+        const invalidIds = productIds.filter(id => !mongoose.Types.ObjectId.isValid(id));
+        if (invalidIds.length > 0) {
+            return res.status(400).json({
+                message: 'Some product IDs are invalid',
+                error: true,
+                success: false,
+                invalidIds
+            });
+        }
+
+        // ================ FETCH PRODUCTS ================
+        
+        const products = await ProductModel.find({ _id: { $in: productIds } });
+
+        if (products.length === 0) {
+            return res.status(404).json({
+                message: 'No products found with provided IDs',
+                error: true,
+                success: false
+            });
+        }
+
+        // ================ DELETE IMAGES FROM CLOUDINARY ================
+        
+        const allImages = products.flatMap(product => product.images || []);
+        const deletedImages = [];
+        const failedImages = [];
+
+        if (allImages.length > 0) {
+            console.log(`Deleting ${allImages.length} images from Cloudinary...`);
+
+            const deletePromises = allImages.map(async (img) => {
+                try {
+                    const result = await deleteImage(img.public_id);
+                    if (result) {
+                        deletedImages.push(img.public_id);
+                    } else {
+                        failedImages.push(img.public_id);
+                    }
+                } catch (error) {
+                    console.error(`Failed to delete image ${img.public_id}:`, error);
+                    failedImages.push(img.public_id);
+                }
+            });
+
+            await Promise.all(deletePromises);
+        }
+
+        // ================ DELETE PRODUCTS FROM DATABASE ================
+        
+        const deleteResult = await ProductModel.deleteMany({ 
+            _id: { $in: products.map(p => p._id) } 
+        });
+
+        // ================ PREPARE RESPONSE ================
+        
+        return res.status(200).json({
+            message: 'Products deleted successfully',
+            error: false,
+            success: true,
+            data: {
+                productsDeleted: deleteResult.deletedCount,
+                productsRequested: productIds.length,
+                imagesDeleted: deletedImages.length,
+                imagesFailed: failedImages.length,
+                deletedProductIds: products.map(p => p._id)
+            },
+            warning: failedImages.length > 0 
+                ? `${failedImages.length} image(s) failed to delete from Cloudinary` 
+                : null
+        });
+
+    } catch (error) {
+        console.error('Bulk Delete Products Error:', error);
+
+        return res.status(500).json({
+            message: error.message || 'Failed to delete products',
+            error: true,
+            success: false
+        });
+    }
+}
