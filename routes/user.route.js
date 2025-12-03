@@ -30,7 +30,7 @@ userRouter.post("/refresh-token", refreshTokenController);
 userRouter.post("/forgot-password", forgotPasswordController);
 userRouter.post("/verify-reset-code", verifyResetCodeController);
 userRouter.post("/reset-password", resetPasswordController);
-userRouter.post("/change-password", auth, changePasswordController);
+userRouter.put("/change-password", auth, changePasswordController);
 
 // Profile routes
 userRouter.post("/profile", auth, getUserProfileController);
