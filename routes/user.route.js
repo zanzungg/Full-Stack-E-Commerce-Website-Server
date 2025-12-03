@@ -10,7 +10,8 @@ import {
     forgotPasswordController,
     verifyResetCodeController,
     resetPasswordController,
-    refreshTokenController
+    refreshTokenController,
+    changePasswordController
 } from "../controllers/user.controller.js";
 import { deleteImageController } from "../controllers/image.controller.js";
 import auth from "../middlewares/auth.js";
@@ -29,9 +30,10 @@ userRouter.post("/refresh-token", refreshTokenController);
 userRouter.post("/forgot-password", forgotPasswordController);
 userRouter.post("/verify-reset-code", verifyResetCodeController);
 userRouter.post("/reset-password", resetPasswordController);
+userRouter.post("/change-password", auth, changePasswordController);
 
 // Profile routes
-userRouter.get("/profile", auth, getUserProfileController);
+userRouter.post("/profile", auth, getUserProfileController);
 userRouter.put("/profile", auth, updateUserProfileController);
 
 // Upload avatar - single file

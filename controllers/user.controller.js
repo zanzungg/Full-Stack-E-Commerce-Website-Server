@@ -757,3 +757,47 @@ export async function refreshTokenController(req, res) {
         });
     }
 }
+
+// Change Password Controller (Optional)
+export async function changePasswordController(req, res) {
+    try {
+        const userId = req.userId; // From auth middleware
+        const { currentPassword, newPassword } = req.body;
+        if (!currentPassword || !newPassword) {
+            return res.status(400).json({
+                message: 'Current and new passwords are required',
+                error: true,
+                success: false
+            });
+        }
+        const user = await UserModel.findById(userId);
+        if (!user) {
+            return res.status(404).json({
+                message: 'User not found',
+                error: true,
+                success: false
+            });
+        }
+        const isPasswordValid = await bcrypt.compare(currentPassword, user.password);
+        if (!isPasswordValid) {
+            return res.status(401).json({
+                message: 'Current password is incorrect',
+                error: true,
+                success: false
+            });
+        }
+        user.password = await bcrypt.hash(newPassword, 10);
+        await user.save();
+        return res.status(200).json({
+            message: 'Password changed successfully',
+            error: false,
+            success: true
+        });
+    } catch (error) {
+        return res.status(500).json({
+            message: error.message || 'Internal server error',
+            error: true,
+            success: false
+        });
+    }
+}
